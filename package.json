@@ -1,0 +1,56 @@
+{
+  "name": "joymixa-bridge",
+  "productName": "Joymixa Bridge",
+  "version": "1.0.0",
+  "description": "Ableton Link bridge and Joymixa-to-Joymixa relay for LAN music sync",
+  "main": ".webpack/main",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/xicnet/joymixa-bridge"
+  },
+  "homepage": "https://joymixa.com",
+  "scripts": {
+    "start": "electron-forge start",
+    "package": "electron-forge package",
+    "make": "electron-forge make",
+    "publish": "electron-forge publish",
+    "lint": "eslint --ext .ts,.tsx .",
+    "rebuild": "electron-rebuild -f -w @ktamas77/abletonlink"
+  },
+  "keywords": ["ableton-link", "music-sync", "webrtc", "electron", "midi"],
+  "author": {
+    "name": "XicNET",
+    "email": "code@xicnet.com"
+  },
+  "license": "MIT",
+  "devDependencies": {
+    "@electron-forge/cli": "^7.11.1",
+    "@electron-forge/maker-deb": "^7.11.1",
+    "@electron-forge/maker-rpm": "^7.11.1",
+    "@electron-forge/maker-squirrel": "^7.11.1",
+    "@electron-forge/maker-zip": "^7.11.1",
+    "@electron-forge/plugin-auto-unpack-natives": "^7.11.1",
+    "@electron-forge/plugin-fuses": "^7.11.1",
+    "@electron-forge/plugin-webpack": "^7.11.1",
+    "@electron/fuses": "^1.8.0",
+    "@electron/rebuild": "^3.7.2",
+    "@types/ws": "^8.18.1",
+    "@typescript-eslint/eslint-plugin": "^5.62.0",
+    "@typescript-eslint/parser": "^5.62.0",
+    "@vercel/webpack-asset-relocator-loader": "^1.7.3",
+    "css-loader": "^6.11.0",
+    "electron": "40.4.0",
+    "eslint": "^8.57.1",
+    "eslint-plugin-import": "^2.32.0",
+    "fork-ts-checker-webpack-plugin": "^7.3.0",
+    "node-loader": "^2.1.0",
+    "style-loader": "^3.3.4",
+    "ts-loader": "^9.5.4",
+    "typescript": "~4.5.4"
+  },
+  "dependencies": {
+    "@ktamas77/abletonlink": "git+https://github.com/Xicnet/ableton-link.git",
+    "electron-squirrel-startup": "^1.0.1",
+    "ws": "^8.19.0"
+  }
+}

@@ -1,0 +1,42 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Joymixa Bridge</title>
+  </head>
+  <body>
+    <div class="titlebar">
+      <span class="title">Joymixa Bridge</span>
+      <button id="close-btn">&times;</button>
+    </div>
+
+    <div class="content">
+      <div class="status-section">
+        <div class="status-row">
+          <span class="label">Link</span>
+          <span id="link-status" class="value badge badge-active">Active</span>
+        </div>
+        <div class="status-row">
+          <span class="label">Link Peers</span>
+          <span id="peer-count" class="value">0</span>
+        </div>
+        <div class="status-row">
+          <span class="label">BPM</span>
+          <span id="tempo" class="value">120.0</span>
+        </div>
+        <div class="status-row">
+          <span class="label">Transport</span>
+          <span id="transport" class="value">Stopped</span>
+        </div>
+        <div class="status-row">
+          <span class="label">Browser Clients</span>
+          <span id="client-count" class="value">0</span>
+        </div>
+      </div>
+
+      <div class="divider"></div>
+
+      <p id="ws-url" class="ws-url"></p>
+    </div>
+  </body>
+</html>
