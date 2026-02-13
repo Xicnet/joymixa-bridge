@@ -1,5 +1,6 @@
 import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, dialog, shell } from 'electron';
 import * as os from 'os';
+import * as path from 'path';
 import { Bridge } from './bridge';
 
 declare const MAIN_WINDOW_WEBPACK_ENTRY: string;
@@ -30,13 +31,21 @@ function getLocalIP(): string {
 }
 
 function createTrayIcon(): Electron.NativeImage {
-  // 16x16 tray icon as SVG data URL (white "J" on transparent background)
-  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">
-    <circle cx="8" cy="8" r="7.5" fill="white"/>
-    <text x="8" y="12" text-anchor="middle" font-family="sans-serif" font-size="11" font-weight="bold" fill="black">J</text>
+  // Try file-based PNG first (works reliably on Linux/i3bar)
+  const iconPaths = [
+    path.join(__dirname, '..', '..', 'assets', 'tray-icon.png'),  // dev
+    path.join(process.resourcesPath || '', 'tray-icon.png'),       // packaged
+  ];
+  for (const p of iconPaths) {
+    const img = nativeImage.createFromPath(p);
+    if (!img.isEmpty()) return img;
+  }
+  // Fallback: inline SVG
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 512 512">
+    <rect width="512" height="512" rx="80" fill="#ffffff"/>
+    <circle cx="256" cy="256" r="200" fill="#1a1a2e"/>
   </svg>`;
-  const dataUrl = `data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`;
-  return nativeImage.createFromDataURL(dataUrl);
+  return nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`);
 }
 
 function createStatusWindow(): void {

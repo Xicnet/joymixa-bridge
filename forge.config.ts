@@ -38,6 +38,7 @@ const config: ForgeConfig = {
     name: 'Joymixa Bridge',
     executableName: 'joymixa-bridge',
     icon: './assets/icon',
+    extraResource: ['./assets/tray-icon.png'],
     afterCopy: [
       (buildPath, _electronVersion, _platform, _arch, callback) => {
         try {
