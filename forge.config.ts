@@ -14,7 +14,9 @@ import { preloadConfig } from './webpack.preload.config';
 
 const config: ForgeConfig = {
   packagerConfig: {
-    asar: true,
+    asar: {
+      unpack: '**/node_modules/{@ktamas77/abletonlink,bindings,file-uri-to-path}/**',
+    },
     name: 'Joymixa Bridge',
     executableName: 'joymixa-bridge',
     icon: './assets/icon',
