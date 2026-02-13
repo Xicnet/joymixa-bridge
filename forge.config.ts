@@ -7,19 +7,47 @@ import { AutoUnpackNativesPlugin } from '@electron-forge/plugin-auto-unpack-nati
 import { WebpackPlugin } from '@electron-forge/plugin-webpack';
 import { FusesPlugin } from '@electron-forge/plugin-fuses';
 import { FuseV1Options, FuseVersion } from '@electron/fuses';
+import * as path from 'path';
+import * as fs from 'fs';
 
 import { mainConfig } from './webpack.main.config';
 import { rendererConfig } from './webpack.renderer.config';
 import { preloadConfig } from './webpack.preload.config';
 
+// Native modules that webpack externalizes — must be copied into the package
+const NATIVE_MODULES = ['@ktamas77/abletonlink', 'bindings', 'file-uri-to-path', 'node-addon-api'];
+
+function copyNativeModules(buildPath: string): void {
+  const srcNodeModules = path.resolve(__dirname, 'node_modules');
+  const destNodeModules = path.join(buildPath, 'node_modules');
+
+  for (const mod of NATIVE_MODULES) {
+    const srcDir = path.join(srcNodeModules, mod);
+    const destDir = path.join(destNodeModules, mod);
+    if (fs.existsSync(srcDir)) {
+      fs.cpSync(srcDir, destDir, { recursive: true });
+    }
+  }
+}
+
 const config: ForgeConfig = {
   packagerConfig: {
     asar: {
-      unpack: '**/node_modules/{@ktamas77/abletonlink,bindings,file-uri-to-path}/**',
+      unpack: '**/node_modules/{@ktamas77/abletonlink,bindings,file-uri-to-path,node-addon-api}/**',
     },
     name: 'Joymixa Bridge',
     executableName: 'joymixa-bridge',
     icon: './assets/icon',
+    afterCopy: [
+      (buildPath, _electronVersion, _platform, _arch, callback) => {
+        try {
+          copyNativeModules(buildPath);
+          callback();
+        } catch (err) {
+          callback(err as Error);
+        }
+      },
+    ],
   },
   rebuildConfig: {},
   makers: [
