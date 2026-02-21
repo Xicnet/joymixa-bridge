@@ -55,8 +55,10 @@ export class Bridge extends EventEmitter {
     // Link callbacks
     this.link.setTempoCallback((rawTempo: number) => {
       const tempo = Math.round(rawTempo * 100) / 100;
+      const beat = this.link!.getBeat();
+      const phase = this.link!.getPhase(this.config.quantum);
       console.log('[bridge] tempo from Link:', tempo);
-      this.broadcast({ type: 'tempo', tempo });
+      this.broadcast({ type: 'tempo', tempo, beat, phase, quantum: this.config.quantum });
       this.emit('tempo', tempo);
     });
 
@@ -215,7 +217,10 @@ export class Bridge extends EventEmitter {
     if (msg.type === 'set-tempo' && typeof msg.tempo === 'number' && isFinite(msg.tempo) && msg.tempo > 0) {
       console.log('[bridge] client set-tempo:', msg.tempo);
       this.link.setTempo(msg.tempo);
-      this.broadcast({ type: 'tempo', tempo: this.link.getTempo() });
+      const tempo = this.link.getTempo();
+      const beat = this.link.getBeat();
+      const phase = this.link.getPhase(this.config.quantum);
+      this.broadcast({ type: 'tempo', tempo, beat, phase, quantum: this.config.quantum });
     }
 
     if (msg.type === 'play') {
