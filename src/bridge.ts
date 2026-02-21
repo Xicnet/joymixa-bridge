@@ -17,6 +17,7 @@ export interface BridgeState {
   quantum: number;
   numPeers: number;
   numClients: number;
+  nextBar0Delay: number; // ms until next bar-0 boundary (from Link timeline)
 }
 
 const DEFAULT_CONFIG: BridgeConfig = {
@@ -173,15 +174,26 @@ export class Bridge extends EventEmitter {
         phase: 0,
         quantum: this.config.quantum,
         numPeers: 0,
+        nextBar0Delay: 0,
       };
     }
+    // Read all values once — each getter calls captureAppSessionState()
+    // internally, so we minimise the number of calls and use the same
+    // phase/tempo for both the state message and nextBar0Delay.
+    const beat = this.link.getBeat();
+    const quantum = this.config.quantum;
+    const phase = this.link.getPhase(quantum);
+    const tempo = this.link.getTempo();
+    const remainingBeats = quantum - phase;
+    const msPerBeat = 60000 / tempo;
     return {
-      tempo: Math.round(this.link.getTempo() * 100) / 100,
+      tempo: Math.round(tempo * 100) / 100,
       isPlaying: this.link.isPlaying(),
-      beat: this.link.getBeat(),
-      phase: this.link.getPhase(this.config.quantum),
-      quantum: this.config.quantum,
+      beat,
+      phase,
+      quantum,
       numPeers: this.link.getNumPeers(),
+      nextBar0Delay: remainingBeats * msPerBeat,
     };
   }
 
