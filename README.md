@@ -91,7 +91,7 @@ On launch, the app:
 |---------|--------|-----------|
 | `hello` | `tempo, isPlaying, beat, phase, quantum, numPeers, numClients` | Once on connect |
 | `state` | Same as hello | 20Hz continuous |
-| `tempo` | `tempo` | On Link tempo change |
+| `tempo` | `tempo, beat, phase, quantum` | On Link tempo change |
 | `playing` | `isPlaying` | On Link transport change |
 | `peers` | `numPeers` | On Link peer count change |
 | `relay` | `payload: {...}` | Forwarded from other clients |
@@ -158,6 +158,21 @@ Default values in `bridge.ts`:
 **Native addon build fails:**
 - Ensure `build-essential`, `python3`, and `node-gyp` are installed
 - After `yarn install`, always run `yarn rebuild` to recompile for Electron
+
+## Releasing
+
+Builds are automated via GitHub Actions (`.github/workflows/build.yml`). Pushing a `v*` tag triggers the workflow which builds `.deb` + `.zip` (Linux) and `.zip` (macOS), then creates a GitHub Release with the artifacts.
+
+```bash
+# 1. Bump version in package.json
+# 2. Commit
+git add package.json && git commit -m "Bump version to X.Y.Z"
+# 3. Tag and push
+git tag vX.Y.Z
+git push origin main --tags
+```
+
+The release appears at https://github.com/Xicnet/joymixa-bridge/releases once the workflow completes.
 
 ## Related
 
