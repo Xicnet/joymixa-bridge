@@ -52,7 +52,8 @@ export class Bridge extends EventEmitter {
     console.log('[bridge] Link enabled. peers:', this.link.getNumPeers());
 
     // Link callbacks
-    this.link.setTempoCallback((tempo: number) => {
+    this.link.setTempoCallback((rawTempo: number) => {
+      const tempo = Math.round(rawTempo * 100) / 100;
       console.log('[bridge] tempo from Link:', tempo);
       this.broadcast({ type: 'tempo', tempo });
       this.emit('tempo', tempo);
@@ -117,6 +118,7 @@ export class Bridge extends EventEmitter {
         ...this.getLinkState(),
         numClients: this.clients.size,
         ...(jmxBeat !== undefined && { jmxBeat }),
+        ts: Date.now(),
       });
     }, 1000 / this.config.stateHz);
 
@@ -174,7 +176,7 @@ export class Bridge extends EventEmitter {
       };
     }
     return {
-      tempo: this.link.getTempo(),
+      tempo: Math.round(this.link.getTempo() * 100) / 100,
       isPlaying: this.link.isPlaying(),
       beat: this.link.getBeat(),
       phase: this.link.getPhase(this.config.quantum),
