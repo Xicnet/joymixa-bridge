@@ -10,6 +10,8 @@
 		A1000001 /* App.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000001 /* App.swift */; };
 		A1000002 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A2000002 /* Assets.xcassets */; };
 		A1000003 /* WebSocketServer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000004 /* WebSocketServer.swift */; };
+		A1000004 /* GameWebView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A2000005 /* GameWebView.swift */; };
+		A1000005 /* GameAssets in Resources */ = {isa = PBXBuildFile; fileRef = A2000006 /* GameAssets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -17,6 +19,8 @@
 		A2000002 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		A2000003 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		A2000004 /* WebSocketServer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WebSocketServer.swift; sourceTree = "<group>"; };
+		A2000005 /* GameWebView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GameWebView.swift; sourceTree = "<group>"; };
+		A2000006 /* GameAssets */ = {isa = PBXFileReference; lastKnownFileType = folder; path = GameAssets; sourceTree = "<group>"; };
 		A2000010 /* LinkBridge.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LinkBridge.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -44,6 +48,8 @@
 			children = (
 				A2000001 /* App.swift */,
 				A2000004 /* WebSocketServer.swift */,
+				A2000005 /* GameWebView.swift */,
+				A2000006 /* GameAssets */,
 				A2000002 /* Assets.xcassets */,
 				A2000003 /* Info.plist */,
 			);
@@ -117,6 +123,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				A1000002 /* Assets.xcassets in Resources */,
+				A1000005 /* GameAssets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -129,6 +136,7 @@
 			files = (
 				A1000001 /* App.swift in Sources */,
 				A1000003 /* WebSocketServer.swift in Sources */,
+				A1000004 /* GameWebView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

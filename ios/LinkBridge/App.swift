@@ -14,6 +14,9 @@ struct LinkBridgeApp: App {
 
 struct ContentView: View {
     @ObservedObject var server: WebSocketServer
+    #if INCLUDE_GAME
+    @State private var showGame = false
+    #endif
 
     var body: some View {
         VStack(spacing: 20) {
@@ -31,6 +34,18 @@ struct ContentView: View {
 
             Text("Clients: \(server.clientCount)")
                 .font(.title2)
+
+            #if INCLUDE_GAME
+            Button("Launch Game") {
+                showGame = true
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.green)
+            .fullScreenCover(isPresented: $showGame) {
+                GameWebView()
+                    .ignoresSafeArea()
+            }
+            #endif
         }
     }
 }

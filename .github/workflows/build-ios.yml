@@ -4,30 +4,47 @@ on:
   push:
     paths:
       - 'ios/**'
+      - 'scripts/**'
 
 jobs:
   build:
     runs-on: macos-latest
+    strategy:
+      matrix:
+        variant: [bridgeOnly, bundle]
     steps:
       - uses: actions/checkout@v4
+
+      - name: Copy game assets
+        if: matrix.variant == 'bundle'
+        run: ./scripts/copy-game-assets.sh
+
       - name: Build
         working-directory: ios
         run: |
+          EXTRA_FLAGS=""
+          if [ "${{ matrix.variant }}" = "bundle" ]; then
+            EXTRA_FLAGS="SWIFT_ACTIVE_COMPILATION_CONDITIONS=\$(inherited)\ INCLUDE_GAME"
+          fi
           xcodebuild -project LinkBridge.xcodeproj \
             -scheme LinkBridge \
             -sdk iphoneos \
             -configuration Release \
-            -archivePath build/LinkBridge.xcarchive \
+            -archivePath build/LinkBridge-${{ matrix.variant }}.xcarchive \
             archive \
             CODE_SIGN_IDENTITY="" \
-            CODE_SIGNING_ALLOWED=NO
+            CODE_SIGNING_ALLOWED=NO \
+            $EXTRA_FLAGS
+
       - name: Export unsigned IPA
         working-directory: ios
         run: |
           mkdir -p build/Payload
-          cp -r build/LinkBridge.xcarchive/Products/Applications/LinkBridge.app build/Payload/
-          cd build && zip -r LinkBridge-unsigned.ipa Payload
+          cp -r build/LinkBridge-${{ matrix.variant }}.xcarchive/Products/Applications/LinkBridge.app build/Payload/
+          cd build && zip -r LinkBridge-${{ matrix.variant }}-unsigned.ipa Payload
+          rm -rf Payload
+
       - uses: actions/upload-artifact@v4
         with:
-          name: LinkBridge-unsigned.ipa
-          path: ios/build/LinkBridge-unsigned.ipa
+          name: LinkBridge-${{ matrix.variant }}-unsigned.ipa
+          path: ios/build/LinkBridge-${{ matrix.variant }}-unsigned.ipa

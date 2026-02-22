@@ -1,6 +1,7 @@
 package com.xicnet.joymixabridge
 
 import android.Manifest
+import android.view.View
 import android.content.BroadcastReceiver
 import android.content.ComponentName
 import android.content.Context
@@ -73,6 +74,13 @@ class MainActivity : AppCompatActivity() {
         val serviceIntent = BridgeService.buildIntent(this)
         ContextCompat.startForegroundService(this, serviceIntent)
         bindService(serviceIntent, serviceConnection, Context.BIND_AUTO_CREATE)
+
+        if (BuildConfig.INCLUDE_GAME) {
+            binding.launchGameButton.visibility = View.VISIBLE
+            binding.launchGameButton.setOnClickListener {
+                startActivity(Intent(this, GameActivity::class.java))
+            }
+        }
     }
 
     override fun onResume() {

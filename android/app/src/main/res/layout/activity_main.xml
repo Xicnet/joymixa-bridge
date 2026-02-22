@@ -68,4 +68,14 @@
         android:gravity="center"
         android:text="" />
 
+    <Button
+        android:id="@+id/launchGameButton"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Launch Game"
+        android:layout_marginTop="24dp"
+        android:backgroundTint="@color/playing"
+        android:textColor="@color/background"
+        android:visibility="gone" />
+
 </LinearLayout>
