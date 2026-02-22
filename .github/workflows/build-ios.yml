@@ -1,0 +1,33 @@
+name: Build iOS
+
+on:
+  push:
+    paths:
+      - 'ios/**'
+
+jobs:
+  build:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        working-directory: ios
+        run: |
+          xcodebuild -project LinkBridge.xcodeproj \
+            -scheme LinkBridge \
+            -sdk iphoneos \
+            -configuration Release \
+            -archivePath build/LinkBridge.xcarchive \
+            archive \
+            CODE_SIGN_IDENTITY="" \
+            CODE_SIGNING_ALLOWED=NO
+      - name: Export unsigned IPA
+        working-directory: ios
+        run: |
+          mkdir -p build/Payload
+          cp -r build/LinkBridge.xcarchive/Products/Applications/LinkBridge.app build/Payload/
+          cd build && zip -r LinkBridge-unsigned.ipa Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LinkBridge-unsigned.ipa
+          path: ios/build/LinkBridge-unsigned.ipa
