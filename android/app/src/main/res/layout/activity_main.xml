@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/background"
+    android:padding="24dp">
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:text="Joymixa Bridge"
+        android:textColor="@color/label"
+        android:textSize="16sp"
+        android:textStyle="bold"
+        android:letterSpacing="0.05"
+        android:layout_marginBottom="24dp" />
+
+    <!-- Link status -->
+    <LinearLayout style="@style/StatusRow">
+        <TextView style="@style/Label" android:text="LINK" />
+        <TextView
+            android:id="@+id/linkStatus"
+            style="@style/BadgeActive"
+            android:text="Active" />
+    </LinearLayout>
+
+    <!-- Peers -->
+    <LinearLayout style="@style/StatusRow">
+        <TextView style="@style/Label" android:text="LINK PEERS" />
+        <TextView android:id="@+id/peerCount" style="@style/Value" android:text="0" />
+    </LinearLayout>
+
+    <!-- BPM -->
+    <LinearLayout style="@style/StatusRow">
+        <TextView style="@style/Label" android:text="BPM" />
+        <TextView android:id="@+id/tempo" style="@style/Value" android:text="120.0" />
+    </LinearLayout>
+
+    <!-- Transport -->
+    <LinearLayout style="@style/StatusRow">
+        <TextView style="@style/Label" android:text="TRANSPORT" />
+        <TextView android:id="@+id/transport" style="@style/Value" android:text="Stopped" />
+    </LinearLayout>
+
+    <!-- Browser Clients -->
+    <LinearLayout style="@style/StatusRow">
+        <TextView style="@style/Label" android:text="BROWSER CLIENTS" />
+        <TextView android:id="@+id/clientCount" style="@style/Value" android:text="0" />
+    </LinearLayout>
+
+    <!-- Divider -->
+    <View
+        android:layout_width="match_parent"
+        android:layout_height="1dp"
+        android:background="@color/divider"
+        android:layout_marginTop="20dp"
+        android:layout_marginBottom="20dp" />
+
+    <!-- WS URL -->
+    <TextView
+        android:id="@+id/wsUrl"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:textColor="@color/label"
+        android:textSize="12sp"
+        android:fontFamily="monospace"
+        android:gravity="center"
+        android:text="" />
+
+</LinearLayout>

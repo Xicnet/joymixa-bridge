@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="background">#FF1A1A2E</color>
+    <color name="surface">#FF16213E</color>
+    <color name="label">#FF808090</color>
+    <color name="value">#FFE0E0F0</color>
+    <color name="playing">#FF00D26A</color>
+    <color name="stopped">#FFFF6B6B</color>
+    <color name="divider">#FF2A2A4A</color>
+    <color name="badge_active_bg">#2600D26A</color>
+</resources>
