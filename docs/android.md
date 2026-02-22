@@ -24,7 +24,11 @@ adb logcat -s LinkJNI BridgeService       # verify Link + WS server
 ## Requirements
 
 - Android SDK + NDK + CMake 3.22.1+ (auto-installed by Gradle on first build)
-- Java 17 (Android Studio's bundled JBR works: `~/android-studio/jbr`)
+- Java 17 — no system Java installed, use Android Studio's bundled JBR:
+  ```bash
+  export JAVA_HOME=~/android-studio/jbr   # add to ~/.bashrc or ~/.zshrc
+  ```
+  Without this, `./gradlew` will fail with "JAVA_HOME is not set".
 - `minSdk 26`, `targetSdk 34`, `compileSdk 34`
 
 ## Architecture
