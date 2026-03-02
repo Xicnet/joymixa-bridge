@@ -9,8 +9,7 @@ Both native apps (Android/iOS) support embedding the Joymixa game directly, givi
 cd /path/to/joymixa && yarn build-prod
 
 # 2. Copy game assets into both platform projects
-./scripts/copy-game-assets.sh            # defaults to en language
-./scripts/copy-game-assets.sh es         # or specify a language
+./scripts/copy-game-assets.sh
 
 # 3. Build
 cd android
@@ -48,17 +47,17 @@ The game is an Angular 19 + Phaser 3 web app. Its production build output is a f
 
 ## Asset copy script
 
-`scripts/copy-game-assets.sh [lang] [browser-folder]`
+`scripts/copy-game-assets.sh [browser-folder]`
 
 | Arg | Default | Description |
 |-----|---------|-------------|
-| `lang` | `en` | Language folder to bundle (one language per build) |
-| `browser-folder` | `../joymixa/dist/template-angular/browser` | Path to Angular build output |
+| `browser-folder` | `../joymixa/dist/template-angular/browser` | Path to Angular build output root |
 
 The script:
-1. Copies the selected language folder into both platform projects
-2. Rewrites `<base href="/en/">` → `<base href="./">` (required for WebView)
-3. Removes `ngsw-worker.js` and `ngsw.json` (Angular service worker, unnecessary in WebView)
+1. Copies the build root (JS chunks, CSS, `assets/`) into both platform projects — locale pre-render subdirs are excluded (SEO-only, not needed in WebView)
+2. Renames `index.csr.html` → `index.html`
+3. Rewrites `<base href="/">` → `<base href="./">` (required for WebView relative URLs)
+4. Removes service worker files (`ngsw-worker.js`, `ngsw.json`, `safety-worker.js`, `worker-basic.min.js`)
 
 Output locations:
 - Android: `android/app/src/bundle/assets/game/` (Gradle flavor source set)
@@ -133,7 +132,6 @@ JS `console.log/error` also appears in logcat tagged `GameWebView`.
 ## Known limitations
 
 - **POST request bodies**: `shouldInterceptRequest` doesn't expose request bodies. POST endpoints needing a body (telemetry) get 400 errors. Non-critical — soundbank loading works with empty POST.
-- **Single language per build**: The script bundles one language folder. No runtime language switching.
 - **Backend URL hardcoded**: The proxy target (`test.joymixa.com`) is hardcoded in `GameActivity.kt`. Production builds would need `joymixa.com`.
 - **Auth0 redirect**: Auth0 login redirects to `test.joymixa.com/callback` which won't work in the WebView. Guest/public soundbanks work; authenticated features need further work.
 
