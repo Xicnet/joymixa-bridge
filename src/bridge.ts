@@ -1,6 +1,7 @@
 import { AbletonLink } from '@ktamas77/abletonlink';
 import { WebSocketServer, WebSocket } from 'ws';
 import { EventEmitter } from 'events';
+import * as os from 'os';
 
 export interface BridgeConfig {
   port: number;
@@ -35,6 +36,9 @@ export class Bridge extends EventEmitter {
   private clientLoopBeats = new Map<WebSocket, number>();
   private stateInterval: ReturnType<typeof setInterval> | null = null;
   private running = false;
+  // Phase-alignment diagnostics — set false before release builds.
+  // To capture logs on macOS: cd /Applications/Joymixa\ Bridge.app/Contents/MacOS && ./Joymixa\ Bridge 2>&1 | tee ~/bridge-debug.log
+  private diagLog = true;
 
   constructor(config?: Partial<BridgeConfig>) {
     super();
@@ -51,6 +55,14 @@ export class Bridge extends EventEmitter {
     this.link.enableStartStopSync(true);
 
     console.log('[bridge] Link enabled. peers:', this.link.getNumPeers());
+
+    if (this.diagLog) {
+      console.log(
+        '[Bridge] platform=%s arch=%s os=%s quantum=%d defaultBpm=%d stateHz=%d',
+        process.platform, process.arch, os.release(),
+        this.config.quantum, this.config.defaultBpm, this.config.stateHz,
+      );
+    }
 
     // Link callbacks
     this.link.setTempoCallback((rawTempo: number) => {
@@ -85,12 +97,24 @@ export class Bridge extends EventEmitter {
 
       // Initial snapshot
       const jmxBeat = this.getJmxBeat();
-      ws.send(JSON.stringify({
+      const helloState = this.getLinkState();
+      const helloMsg = {
         type: 'hello',
-        ...this.getLinkState(),
+        ...helloState,
         numClients: this.clients.size,
         ...(jmxBeat !== undefined && { jmxBeat }),
-      }));
+      };
+
+      if (this.diagLog) {
+        console.log(
+          '[Bridge:hello] sending: tempo=%.2f isPlaying=%s beat=%.3f phase=%.3f/%d nextBar0Delay=%.1fms peers=%d clients=%d',
+          helloState.tempo, helloState.isPlaying, helloState.beat,
+          helloState.phase, helloState.quantum, helloState.nextBar0Delay,
+          helloState.numPeers, this.clients.size,
+        );
+      }
+
+      ws.send(JSON.stringify(helloMsg));
 
       ws.on('message', (data: Buffer) => {
         let msg: any;
@@ -116,13 +140,17 @@ export class Bridge extends EventEmitter {
     // Periodic state broadcast
     this.stateInterval = setInterval(() => {
       const jmxBeat = this.getJmxBeat();
+      const ts = Date.now();
       this.broadcast({
         type: 'state',
         ...this.getLinkState(),
         numClients: this.clients.size,
         ...(jmxBeat !== undefined && { jmxBeat }),
-        ts: Date.now(),
+        ts,
       });
+      if (this.diagLog) {
+        console.log('[Bridge:broadcast] ts=%d', ts);
+      }
     }, 1000 / this.config.stateHz);
 
     this.emit('started');
@@ -188,6 +216,29 @@ export class Bridge extends EventEmitter {
     const tempo = this.link.getTempo();
     const remainingBeats = quantum - phase;
     const msPerBeat = 60000 / tempo;
+    const nextBar0Delay = remainingBeats * msPerBeat;
+
+    if (this.diagLog) {
+      console.log(
+        '[Bridge:state] beat=%.3f phase=%.3f/%d tempo=%.2f remainingBeats=%.3f msPerBeat=%.1f nextBar0Delay=%.1fms',
+        beat, phase, quantum, tempo, remainingBeats, msPerBeat, nextBar0Delay,
+      );
+
+      // Phase consistency cross-check: detect multi-snapshot issue
+      const expectedPhase = beat - Math.floor(beat / quantum) * quantum;
+      if (Math.abs(phase - expectedPhase) > 0.05) {
+        console.warn(
+          '[Bridge] PHASE INCONSISTENCY: phase=%.3f expected=%.3f (beat=%.3f quantum=%d) — possible multi-snapshot issue',
+          phase, expectedPhase, beat, quantum,
+        );
+      }
+    }
+
+    // Range validation — always on (indicates bugs, not diagnostics)
+    if (remainingBeats < 0) console.warn('[Bridge] remainingBeats < 0: %f', remainingBeats);
+    if (remainingBeats > quantum) console.warn('[Bridge] remainingBeats > quantum: %f > %d', remainingBeats, quantum);
+    if (nextBar0Delay > quantum * msPerBeat) console.warn('[Bridge] nextBar0Delay exceeds bar: %.1f > %.1f', nextBar0Delay, quantum * msPerBeat);
+
     return {
       tempo: Math.round(tempo * 100) / 100,
       isPlaying: this.link.isPlaying(),
@@ -195,7 +246,7 @@ export class Bridge extends EventEmitter {
       phase,
       quantum,
       numPeers: this.link.getNumPeers(),
-      nextBar0Delay: remainingBeats * msPerBeat,
+      nextBar0Delay,
     };
   }
 
@@ -215,7 +266,7 @@ export class Bridge extends EventEmitter {
     if (!this.link) return;
 
     if (msg.type === 'set-tempo' && typeof msg.tempo === 'number' && isFinite(msg.tempo) && msg.tempo > 0) {
-      console.log('[bridge] client set-tempo:', msg.tempo);
+      console.log('[Bridge:cmd] set-tempo tempo=%.2f', msg.tempo);
       this.link.setTempo(msg.tempo);
       const tempo = this.link.getTempo();
       const beat = this.link.getBeat();
@@ -224,18 +275,18 @@ export class Bridge extends EventEmitter {
     }
 
     if (msg.type === 'play') {
-      console.log('[bridge] client play');
+      console.log('[Bridge:cmd] play');
       this.link.setIsPlaying(true);
     }
 
     if (msg.type === 'stop') {
-      console.log('[bridge] client stop');
+      console.log('[Bridge:cmd] stop');
       this.link.setIsPlaying(false);
     }
 
     if (msg.type === 'request-quantized-start') {
       const quantum = typeof msg.quantum === 'number' ? msg.quantum : this.config.quantum;
-      console.log('[bridge] client request-quantized-start. quantum:', quantum);
+      console.log('[Bridge:cmd] request-quantized-start quantum=%d', quantum);
       this.link.requestBeatAtStartPlayingTime(0, quantum);
       this.link.setIsPlaying(true);
     }
@@ -243,7 +294,7 @@ export class Bridge extends EventEmitter {
     if (msg.type === 'force-beat-at-time') {
       const { beat, time, quantum } = msg;
       if (typeof beat === 'number' && typeof time === 'number' && typeof quantum === 'number') {
-        console.log('[bridge] client force-beat-at-time:', beat, time, quantum);
+        console.log('[Bridge:cmd] force-beat-at-time beat=%.3f time=%d quantum=%d', beat, time, quantum);
         this.link.forceBeatAtTime(beat, time, quantum);
       }
     }
