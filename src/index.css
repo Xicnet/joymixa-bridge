@@ -102,3 +102,29 @@ body {
   font-family: 'SF Mono', 'Fira Code', monospace;
   text-align: center;
 }
+
+.footer-actions {
+  margin-top: 12px;
+  text-align: center;
+}
+
+.copy-logs-btn {
+  background: none;
+  border: 1px solid #2a2a4a;
+  color: #808090;
+  font-size: 11px;
+  padding: 4px 14px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: color 0.2s, border-color 0.2s;
+}
+
+.copy-logs-btn:hover {
+  color: #a0a0c0;
+  border-color: #3a3a5a;
+}
+
+.copy-logs-btn.copied {
+  color: #00d26a;
+  border-color: #00d26a;
+}

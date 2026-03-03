@@ -37,12 +37,37 @@ export class Bridge extends EventEmitter {
   private stateInterval: ReturnType<typeof setInterval> | null = null;
   private running = false;
   // Phase-alignment diagnostics — set false before release builds.
-  // To capture logs on macOS: cd /Applications/Joymixa\ Bridge.app/Contents/MacOS && ./Joymixa\ Bridge 2>&1 | tee ~/bridge-debug.log
   private diagLog = true;
+  // Auto-stop 20Hz state logs after N ticks to avoid flooding.
+  // Hello, command, and range-validation logs are always on.
+  private diagStateCount = 0;
+  private readonly DIAG_STATE_MAX = 100; // ~5s at 20Hz
+
+  // In-memory log ring buffer for "Copy Logs" feature
+  private logBuffer: string[] = [];
+  private readonly LOG_BUFFER_MAX = 500;
 
   constructor(config?: Partial<BridgeConfig>) {
     super();
     this.config = { ...DEFAULT_CONFIG, ...config };
+  }
+
+  private log(msg: string): void {
+    const line = `${new Date().toISOString()} ${msg}`;
+    console.log(msg);
+    this.logBuffer.push(line);
+    if (this.logBuffer.length > this.LOG_BUFFER_MAX) this.logBuffer.shift();
+  }
+
+  private warn(msg: string): void {
+    const line = `${new Date().toISOString()} ${msg}`;
+    console.warn(msg);
+    this.logBuffer.push(line);
+    if (this.logBuffer.length > this.LOG_BUFFER_MAX) this.logBuffer.shift();
+  }
+
+  public getLogs(): string {
+    return this.logBuffer.join('\n');
   }
 
   start(): void {
@@ -54,14 +79,10 @@ export class Bridge extends EventEmitter {
     this.link.enable(true);
     this.link.enableStartStopSync(true);
 
-    console.log('[bridge] Link enabled. peers:', this.link.getNumPeers());
+    this.log(`[bridge] Link enabled. peers: ${this.link.getNumPeers()}`);
 
     if (this.diagLog) {
-      console.log(
-        '[Bridge] platform=%s arch=%s os=%s quantum=%d defaultBpm=%d stateHz=%d',
-        process.platform, process.arch, os.release(),
-        this.config.quantum, this.config.defaultBpm, this.config.stateHz,
-      );
+      this.log(`[Bridge] platform=${process.platform} arch=${process.arch} os=${os.release()} quantum=${this.config.quantum} defaultBpm=${this.config.defaultBpm} stateHz=${this.config.stateHz}`);
     }
 
     // Link callbacks
@@ -69,31 +90,34 @@ export class Bridge extends EventEmitter {
       const tempo = Math.round(rawTempo * 100) / 100;
       const beat = this.link!.getBeat();
       const phase = this.link!.getPhase(this.config.quantum);
-      console.log('[bridge] tempo from Link:', tempo);
+      this.log(`[bridge] tempo from Link: ${tempo}`);
       this.broadcast({ type: 'tempo', tempo, beat, phase, quantum: this.config.quantum });
       this.emit('tempo', tempo);
     });
 
     this.link.setStartStopCallback((isPlaying: boolean) => {
-      console.log('[bridge] start/stop from Link:', isPlaying);
+      this.log(`[bridge] start/stop from Link: ${isPlaying}`);
       this.broadcast({ type: 'playing', isPlaying });
       this.emit('playing', isPlaying);
     });
 
     this.link.setNumPeersCallback((num: number) => {
-      console.log('[bridge] peers changed:', num);
+      this.log(`[bridge] peers changed: ${num}`);
       this.broadcast({ type: 'peers', numPeers: num });
       this.emit('peers', num);
     });
 
     // WebSocket server — listen on all interfaces for LAN access
     this.wss = new WebSocketServer({ host: '0.0.0.0', port: this.config.port });
-    console.log(`[bridge] WebSocket listening on ws://0.0.0.0:${this.config.port}`);
+    this.log(`[bridge] WebSocket listening on ws://0.0.0.0:${this.config.port}`);
 
     this.wss.on('connection', (ws: WebSocket) => {
       this.clients.add(ws);
-      console.log('[bridge] client connected. clients:', this.clients.size);
+      this.log(`[bridge] client connected. clients: ${this.clients.size}`);
       this.emit('clients', this.clients.size);
+
+      // Reset diagnostic counter so new connections get fresh state logs
+      this.diagStateCount = 0;
 
       // Initial snapshot
       const jmxBeat = this.getJmxBeat();
@@ -106,12 +130,7 @@ export class Bridge extends EventEmitter {
       };
 
       if (this.diagLog) {
-        console.log(
-          '[Bridge:hello] sending: tempo=%.2f isPlaying=%s beat=%.3f phase=%.3f/%d nextBar0Delay=%.1fms peers=%d clients=%d',
-          helloState.tempo, helloState.isPlaying, helloState.beat,
-          helloState.phase, helloState.quantum, helloState.nextBar0Delay,
-          helloState.numPeers, this.clients.size,
-        );
+        this.log(`[Bridge:hello] sending: tempo=${helloState.tempo.toFixed(2)} isPlaying=${helloState.isPlaying} beat=${helloState.beat.toFixed(3)} phase=${helloState.phase.toFixed(3)}/${helloState.quantum} nextBar0Delay=${helloState.nextBar0Delay.toFixed(1)}ms peers=${helloState.numPeers} clients=${this.clients.size}`);
       }
 
       ws.send(JSON.stringify(helloMsg));
@@ -121,7 +140,7 @@ export class Bridge extends EventEmitter {
         try {
           msg = JSON.parse(data.toString());
         } catch {
-          console.error('[bridge] JSON parse error');
+          this.warn('[bridge] JSON parse error');
           return;
         }
 
@@ -132,7 +151,7 @@ export class Bridge extends EventEmitter {
       ws.on('close', () => {
         this.clients.delete(ws);
         this.clientLoopBeats.delete(ws);
-        console.log('[bridge] client disconnected. clients:', this.clients.size);
+        this.log(`[bridge] client disconnected. clients: ${this.clients.size}`);
         this.emit('clients', this.clients.size);
       });
     });
@@ -148,9 +167,6 @@ export class Bridge extends EventEmitter {
         ...(jmxBeat !== undefined && { jmxBeat }),
         ts,
       });
-      if (this.diagLog) {
-        console.log('[Bridge:broadcast] ts=%d', ts);
-      }
     }, 1000 / this.config.stateHz);
 
     this.emit('started');
@@ -180,7 +196,7 @@ export class Bridge extends EventEmitter {
       this.link = null;
     }
 
-    console.log('[bridge] stopped');
+    this.log('[bridge] stopped');
     this.emit('stopped');
   }
 
@@ -218,26 +234,18 @@ export class Bridge extends EventEmitter {
     const msPerBeat = 60000 / tempo;
     const nextBar0Delay = remainingBeats * msPerBeat;
 
-    if (this.diagLog) {
-      console.log(
-        '[Bridge:state] beat=%.3f phase=%.3f/%d tempo=%.2f remainingBeats=%.3f msPerBeat=%.1f nextBar0Delay=%.1fms',
-        beat, phase, quantum, tempo, remainingBeats, msPerBeat, nextBar0Delay,
-      );
-
-      // Phase consistency cross-check: detect multi-snapshot issue
-      const expectedPhase = beat - Math.floor(beat / quantum) * quantum;
-      if (Math.abs(phase - expectedPhase) > 0.05) {
-        console.warn(
-          '[Bridge] PHASE INCONSISTENCY: phase=%.3f expected=%.3f (beat=%.3f quantum=%d) — possible multi-snapshot issue',
-          phase, expectedPhase, beat, quantum,
-        );
+    if (this.diagLog && this.diagStateCount < this.DIAG_STATE_MAX) {
+      this.diagStateCount++;
+      this.log(`[Bridge:state] beat=${beat.toFixed(3)} phase=${phase.toFixed(3)}/${quantum} tempo=${tempo.toFixed(2)} remainingBeats=${remainingBeats.toFixed(3)} msPerBeat=${msPerBeat.toFixed(1)} nextBar0Delay=${nextBar0Delay.toFixed(1)}ms`);
+      if (this.diagStateCount === this.DIAG_STATE_MAX) {
+        this.log(`[Bridge:state] diagnostic state logging stopped after ${this.DIAG_STATE_MAX} ticks`);
       }
     }
 
     // Range validation — always on (indicates bugs, not diagnostics)
-    if (remainingBeats < 0) console.warn('[Bridge] remainingBeats < 0: %f', remainingBeats);
-    if (remainingBeats > quantum) console.warn('[Bridge] remainingBeats > quantum: %f > %d', remainingBeats, quantum);
-    if (nextBar0Delay > quantum * msPerBeat) console.warn('[Bridge] nextBar0Delay exceeds bar: %.1f > %.1f', nextBar0Delay, quantum * msPerBeat);
+    if (remainingBeats < 0) this.warn(`[Bridge] remainingBeats < 0: ${remainingBeats}`);
+    if (remainingBeats > quantum) this.warn(`[Bridge] remainingBeats > quantum: ${remainingBeats} > ${quantum}`);
+    if (nextBar0Delay > quantum * msPerBeat) this.warn(`[Bridge] nextBar0Delay exceeds bar: ${nextBar0Delay.toFixed(1)} > ${(quantum * msPerBeat).toFixed(1)}`);
 
     return {
       tempo: Math.round(tempo * 100) / 100,
@@ -266,7 +274,7 @@ export class Bridge extends EventEmitter {
     if (!this.link) return;
 
     if (msg.type === 'set-tempo' && typeof msg.tempo === 'number' && isFinite(msg.tempo) && msg.tempo > 0) {
-      console.log('[Bridge:cmd] set-tempo tempo=%.2f', msg.tempo);
+      this.log(`[Bridge:cmd] set-tempo tempo=${msg.tempo.toFixed(2)}`);
       this.link.setTempo(msg.tempo);
       const tempo = this.link.getTempo();
       const beat = this.link.getBeat();
@@ -275,18 +283,18 @@ export class Bridge extends EventEmitter {
     }
 
     if (msg.type === 'play') {
-      console.log('[Bridge:cmd] play');
+      this.log('[Bridge:cmd] play');
       this.link.setIsPlaying(true);
     }
 
     if (msg.type === 'stop') {
-      console.log('[Bridge:cmd] stop');
+      this.log('[Bridge:cmd] stop');
       this.link.setIsPlaying(false);
     }
 
     if (msg.type === 'request-quantized-start') {
       const quantum = typeof msg.quantum === 'number' ? msg.quantum : this.config.quantum;
-      console.log('[Bridge:cmd] request-quantized-start quantum=%d', quantum);
+      this.log(`[Bridge:cmd] request-quantized-start quantum=${quantum}`);
       this.link.requestBeatAtStartPlayingTime(0, quantum);
       this.link.setIsPlaying(true);
     }
@@ -294,7 +302,7 @@ export class Bridge extends EventEmitter {
     if (msg.type === 'force-beat-at-time') {
       const { beat, time, quantum } = msg;
       if (typeof beat === 'number' && typeof time === 'number' && typeof quantum === 'number') {
-        console.log('[Bridge:cmd] force-beat-at-time beat=%.3f time=%d quantum=%d', beat, time, quantum);
+        this.log(`[Bridge:cmd] force-beat-at-time beat=${beat.toFixed(3)} time=${time} quantum=${quantum}`);
         this.link.forceBeatAtTime(beat, time, quantum);
       }
     }

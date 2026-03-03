@@ -4,6 +4,7 @@ interface BridgeAPI {
   getState: () => Promise<any>;
   getLocalIP: () => Promise<string>;
   getPort: () => Promise<number>;
+  getLogs: () => Promise<string>;
   closeWindow: () => Promise<void>;
   onUpdate: (callback: (state: any) => void) => () => void;
 }
@@ -46,6 +47,19 @@ async function init(): Promise<void> {
   const ip = await window.bridge.getLocalIP();
   const port = await window.bridge.getPort();
   $('ws-url').textContent = `ws://${ip}:${port}`;
+
+  // Copy Logs button
+  const copyBtn = $('copy-logs-btn');
+  copyBtn.addEventListener('click', async () => {
+    const logs = await window.bridge.getLogs();
+    await navigator.clipboard.writeText(logs);
+    copyBtn.textContent = 'Copied!';
+    copyBtn.classList.add('copied');
+    setTimeout(() => {
+      copyBtn.textContent = 'Copy Logs';
+      copyBtn.classList.remove('copied');
+    }, 2000);
+  });
 
   // Listen for live updates from main process
   window.bridge.onUpdate((updatedState) => {

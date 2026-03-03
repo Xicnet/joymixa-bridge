@@ -57,7 +57,7 @@ function createStatusWindow(): void {
 
   statusWindow = new BrowserWindow({
     width: 320,
-    height: 260,
+    height: 290,
     resizable: false,
     maximizable: false,
     fullscreenable: false,
@@ -173,6 +173,10 @@ function setupIPC(): void {
 
   ipcMain.handle('get-port', () => {
     return 20809;
+  });
+
+  ipcMain.handle('get-logs', () => {
+    return bridge?.getLogs() ?? '';
   });
 
   ipcMain.handle('close-window', () => {
