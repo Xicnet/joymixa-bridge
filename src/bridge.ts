@@ -38,10 +38,6 @@ export class Bridge extends EventEmitter {
   private running = false;
   // Phase-alignment diagnostics — set false before release builds.
   private diagLog = true;
-  // Auto-stop 20Hz state logs after N ticks to avoid flooding.
-  // Hello, command, and range-validation logs are always on.
-  private diagStateCount = 0;
-  private readonly DIAG_STATE_MAX = 100; // ~5s at 20Hz
 
   // In-memory log ring buffer for "Copy Logs" feature
   private logBuffer: string[] = [];
@@ -115,9 +111,6 @@ export class Bridge extends EventEmitter {
       this.clients.add(ws);
       this.log(`[bridge] client connected. clients: ${this.clients.size}`);
       this.emit('clients', this.clients.size);
-
-      // Reset diagnostic counter so new connections get fresh state logs
-      this.diagStateCount = 0;
 
       // Initial snapshot
       const jmxBeat = this.getJmxBeat();
@@ -234,12 +227,8 @@ export class Bridge extends EventEmitter {
     const msPerBeat = 60000 / tempo;
     const nextBar0Delay = remainingBeats * msPerBeat;
 
-    if (this.diagLog && this.diagStateCount < this.DIAG_STATE_MAX) {
-      this.diagStateCount++;
+    if (this.diagLog) {
       this.log(`[Bridge:state] beat=${beat.toFixed(3)} phase=${phase.toFixed(3)}/${quantum} tempo=${tempo.toFixed(2)} remainingBeats=${remainingBeats.toFixed(3)} msPerBeat=${msPerBeat.toFixed(1)} nextBar0Delay=${nextBar0Delay.toFixed(1)}ms`);
-      if (this.diagStateCount === this.DIAG_STATE_MAX) {
-        this.log(`[Bridge:state] diagnostic state logging stopped after ${this.DIAG_STATE_MAX} ticks`);
-      }
     }
 
     // Range validation — always on (indicates bugs, not diagnostics)

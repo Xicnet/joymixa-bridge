@@ -18,6 +18,26 @@ cd android && ./gradlew assembleBundleDebug
 # iOS — bridge-only in CI; bundle variant is local-only
 ```
 
+## Releasing (Desktop)
+
+GH Actions builds & releases on every `v*` tag push (`.github/workflows/build.yml`).
+Builds for Linux (.deb, .zip) and macOS (.zip). Release is auto-created with artifacts.
+
+**One command:**
+
+```bash
+./scripts/release.sh          # patch bump (1.3.3 → 1.3.4)
+./scripts/release.sh minor    # minor bump (1.3.3 → 1.4.0)
+./scripts/release.sh major    # major bump (1.3.3 → 2.0.0)
+./scripts/release.sh 1.5.0    # explicit version
+```
+
+The script: checks for clean working tree → bumps `package.json` → commits → tags `vX.Y.Z` → pushes both → GH Actions builds & releases.
+
+**Prerequisites:** working tree must be clean (commit or stash changes first).
+
+Track builds at: https://github.com/xicnet/joymixa-bridge/actions
+
 ## Architecture
 
 Monorepo: three implementations of the same Ableton Link → WebSocket bridge (port 20809).
