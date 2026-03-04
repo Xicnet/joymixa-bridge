@@ -57,7 +57,7 @@ function createStatusWindow(): void {
 
   statusWindow = new BrowserWindow({
     width: 320,
-    height: 290,
+    height: 310,
     resizable: false,
     maximizable: false,
     fullscreenable: false,
