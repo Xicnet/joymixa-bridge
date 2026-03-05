@@ -4,6 +4,7 @@ import android.annotation.SuppressLint
 import android.os.Bundle
 import android.util.Log
 import android.webkit.ConsoleMessage
+import android.webkit.JavascriptInterface
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
@@ -105,6 +106,8 @@ class GameActivity : AppCompatActivity() {
             }
         }
 
+        webView.addJavascriptInterface(LogRelayBridge(), "JoymixaBridge")
+
         webView.webChromeClient = object : WebChromeClient() {
             override fun onConsoleMessage(msg: ConsoleMessage?): Boolean {
                 msg?.let {
@@ -115,6 +118,26 @@ class GameActivity : AppCompatActivity() {
         }
 
         webView.loadUrl("https://appassets.androidplatform.net/game/game/index.html")
+    }
+
+    /** Native HTTP bridge for log-relay.ts — bypasses mixed-content restrictions. */
+    private inner class LogRelayBridge {
+        @JavascriptInterface
+        fun relayLog(targetUrl: String, json: String) {
+            Thread {
+                try {
+                    val conn = java.net.URL(targetUrl).openConnection() as java.net.HttpURLConnection
+                    conn.requestMethod = "POST"
+                    conn.setRequestProperty("Content-Type", "application/json")
+                    conn.connectTimeout = 2000
+                    conn.readTimeout = 2000
+                    conn.doOutput = true
+                    conn.outputStream.use { it.write(json.toByteArray()) }
+                    conn.responseCode
+                    conn.disconnect()
+                } catch (_: Exception) { }
+            }.start()
+        }
     }
 
     @Deprecated("Use onBackPressedDispatcher")
