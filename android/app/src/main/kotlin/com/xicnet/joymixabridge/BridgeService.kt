@@ -9,6 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.media.AudioFormat
 import android.media.AudioManager
+import android.media.AudioTimestamp
 import android.media.AudioTrack
 import android.net.wifi.WifiManager
 import android.os.Binder
@@ -56,7 +57,8 @@ class BridgeService : Service() {
     private var wakeLock: PowerManager.WakeLock? = null
 
     // Native audio output latency measurement (ms)
-    private var measuredOutputLatency: Double? = null
+    @Volatile private var measuredOutputLatency: Double? = null
+    private var latencyMethod: String? = null
 
     override fun onBind(intent: Intent?): IBinder = binder
 
@@ -64,7 +66,10 @@ class BridgeService : Service() {
         super.onCreate()
         createNotificationChannel()
         acquireLocks()
-        measureAudioOutputLatency()
+        // Latency measurement runs in background — doesn't block WS server or game boot.
+        // measuredOutputLatency is null until measurement completes; clients fall back to
+        // browser APIs until then.
+        serviceScope.launch(Dispatchers.IO) { measureAudioOutputLatency() }
         startLink()
         startWebSocketServer()
         startStateBroadcastLoop()
@@ -109,13 +114,26 @@ class BridgeService : Service() {
     // ─── Audio latency measurement ───
 
     /**
-     * Measure the native audio output latency.
+     * Measure the native audio output latency using a 3-tier strategy:
      *
-     * Strategy:
-     * 1. AudioTrack.getLatency() via reflection — hidden API that returns the total
-     *    pipeline latency in ms (HAL + buffer + mixer). Available since API 19.
-     * 2. Fallback: AudioManager native buffer frames / sample rate — gives one buffer
-     *    period, which underestimates but is better than nothing.
+     * Tier 1: AudioTrack.getLatency() via reflection — HIDDEN API (@hide, "unsupported"
+     *         tier). Direct HAL query: instant, no warmup, no timing artifacts. Same
+     *         pattern used by Google's Media3/ExoPlayer and VLC. Returns total pipeline
+     *         latency (HAL + buffer + mixer). Works on Android 9-15. The @UnsupportedAppUsage
+     *         annotation has no maxTargetSdk — least-restrictive hidden tier. Google can't
+     *         block it without breaking their own Media3 player. try/catch ensures graceful
+     *         degradation if ever restricted.
+     *
+     * Tier 2: Silent AudioTrack probe + getTimestamp() — PUBLIC API, +/- 1ms accuracy.
+     *         Creates a temporary AudioTrack, writes ~500ms of silence to warm it up,
+     *         then reads AudioTimestamp to compute pipeline latency from frame delta.
+     *         Indirect measurement with more moving parts, but fully public.
+     *
+     * Tier 3: Buffer estimation from AudioManager properties — PUBLIC API, rough estimate
+     *         (~10-30ms error). Uses HAL buffer size * 2 (double-buffering) as pipeline
+     *         approximation.
+     *
+     * Runs on Dispatchers.IO — does not block service startup or game boot.
      */
     private fun measureAudioOutputLatency() {
         val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -124,11 +142,117 @@ class BridgeService : Service() {
         val sampleRate = sampleRateStr?.toIntOrNull() ?: 48000
         val framesPerBuf = framesPerBufStr?.toIntOrNull() ?: 256
 
-        // Try AudioTrack.getLatency() via reflection (hidden API)
+        // Tier 1: AudioTrack.getLatency() via reflection (direct HAL query, same as Media3)
+        val reflectionResult = measureViaGetLatencyReflection(sampleRate)
+        if (reflectionResult != null) {
+            measuredOutputLatency = reflectionResult
+            latencyMethod = "AudioTrack.getLatency"
+            Log.i(TAG, "Audio latency: ${"%.0f".format(reflectionResult)}ms (AudioTrack.getLatency reflection, sr=$sampleRate)")
+            return
+        }
+
+        // Tier 2: Silent AudioTrack probe + getTimestamp() (public API fallback)
+        val timestampResult = measureViaTimestampProbe(sampleRate)
+        if (timestampResult != null) {
+            measuredOutputLatency = timestampResult
+            latencyMethod = "AudioTimestamp"
+            Log.i(TAG, "Audio latency: ${"%.1f".format(timestampResult)}ms (AudioTimestamp probe, sr=$sampleRate)")
+            return
+        }
+
+        // Tier 3: Buffer estimation (public API, rough)
+        val pipelineFrames = framesPerBuf * 2  // HAL double-buffering estimate
+        val bufferMs = pipelineFrames.toDouble() / sampleRate * 1000.0
+        measuredOutputLatency = bufferMs
+        latencyMethod = "buffer-estimate"
+        Log.i(TAG, "Audio latency: ${"%.1f".format(bufferMs)}ms (buffer estimate ${framesPerBuf}*2/$sampleRate, fallback)")
+    }
+
+    /**
+     * Tier 2: Create a silent AudioTrack, write silence to warm it up, then use
+     * the public AudioTrack.getTimestamp() API to compute output latency.
+     *
+     * Returns latency in ms, or null if timestamps are not available.
+     */
+    private fun measureViaTimestampProbe(sampleRate: Int): Double? {
+        var track: AudioTrack? = null
         try {
             val minBuf = AudioTrack.getMinBufferSize(
                 sampleRate, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT
             )
+            if (minBuf <= 0) return null
+
+            @Suppress("DEPRECATION")
+            track = AudioTrack(
+                AudioManager.STREAM_MUSIC,
+                sampleRate,
+                AudioFormat.CHANNEL_OUT_STEREO,
+                AudioFormat.ENCODING_PCM_16BIT,
+                minBuf,
+                AudioTrack.MODE_STREAM
+            )
+
+            // Write silence to warm up the audio pipeline.
+            // minBuf is in bytes; for 16-bit stereo, one frame = 4 bytes = 2 shorts.
+            val samplesPerBuffer = minBuf / 2  // total shorts in buffer
+            val silence = ShortArray(samplesPerBuffer)
+            track.play()
+
+            var totalFramesWritten = 0L
+            val warmupFrames = sampleRate / 2  // ~500ms worth of frames
+            while (totalFramesWritten < warmupFrames) {
+                val framesToWrite = minOf(
+                    (samplesPerBuffer / 2).toLong(),  // shorts / 2 channels = frames
+                    warmupFrames - totalFramesWritten
+                )
+                val shortsToWrite = (framesToWrite * 2).toInt()  // stereo: 2 shorts per frame
+                val written = track.write(silence, 0, shortsToWrite)
+                if (written <= 0) break
+                totalFramesWritten += written / 2  // shorts written / 2 channels = frames
+            }
+
+            // Poll for a valid timestamp (may take a few attempts)
+            val timestamp = AudioTimestamp()
+            var latencyMs: Double? = null
+            for (attempt in 0 until 10) {
+                Thread.sleep(50)
+                if (track.getTimestamp(timestamp)) {
+                    val elapsedNanos = System.nanoTime() - timestamp.nanoTime
+                    val extrapolatedPresented = timestamp.framePosition +
+                        (elapsedNanos * sampleRate / 1_000_000_000.0)
+                    val pendingFrames = totalFramesWritten - extrapolatedPresented
+                    if (pendingFrames >= 0) {
+                        latencyMs = (pendingFrames / sampleRate.toDouble()) * 1000.0
+                        // Sanity check: reject implausible values
+                        if (latencyMs in 1.0..500.0) break
+                        latencyMs = null
+                    }
+                }
+            }
+
+            track.stop()
+            return latencyMs
+        } catch (e: Exception) {
+            Log.d(TAG, "Timestamp probe failed: ${e.message}")
+            return null
+        } finally {
+            track?.release()
+        }
+    }
+
+    /**
+     * Tier 1: AudioTrack.getLatency() via reflection.
+     * Hidden API (unsupported tier) — same pattern used by Google's Media3/ExoPlayer.
+     * Direct HAL query: instant, no warmup, no timing artifacts.
+     * Returns total pipeline latency in ms, or null if the method is unavailable.
+     */
+    private fun measureViaGetLatencyReflection(sampleRate: Int): Double? {
+        try {
+            val minBuf = AudioTrack.getMinBufferSize(
+                sampleRate, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT
+            )
+            if (minBuf <= 0) return null
+
             @Suppress("DEPRECATION")
             val track = AudioTrack(
                 AudioManager.STREAM_MUSIC,
@@ -142,9 +266,7 @@ class BridgeService : Service() {
                 val method = AudioTrack::class.java.getMethod("getLatency")
                 val latencyMs = method.invoke(track) as Int
                 if (latencyMs in 1..500) {
-                    measuredOutputLatency = latencyMs.toDouble()
-                    Log.i(TAG, "Audio latency: ${latencyMs}ms (AudioTrack.getLatency, sr=$sampleRate)")
-                    return
+                    return latencyMs.toDouble()
                 }
             } catch (e: Exception) {
                 Log.d(TAG, "AudioTrack.getLatency() not available: ${e.message}")
@@ -154,11 +276,7 @@ class BridgeService : Service() {
         } catch (e: Exception) {
             Log.d(TAG, "AudioTrack creation failed: ${e.message}")
         }
-
-        // Fallback: native buffer size (one period)
-        val bufferMs = framesPerBuf.toDouble() / sampleRate * 1000.0
-        measuredOutputLatency = bufferMs
-        Log.i(TAG, "Audio latency: ${"%.1f".format(bufferMs)}ms (native buffer $framesPerBuf/$sampleRate, fallback)")
+        return null
     }
 
     // ─── Link ───

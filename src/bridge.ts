@@ -266,8 +266,9 @@ print(String(format: "%.2f %.0f %u %u %u %u", latencyMs, sampleRate, deviceLaten
     return new Promise((resolve) => {
       execFile('swift', ['-e', swiftCode], { timeout: 5000 }, (err, stdout, stderr) => {
         if (err || !stdout) {
-          if (this.diagLog && stderr) {
-            this.log(`[Bridge] CoreAudio swift error: ${stderr.trim()}`);
+          if (this.diagLog) {
+            const detail = stderr?.trim() || err?.message || 'no output';
+            this.log(`[Bridge] CoreAudio swift failed: ${detail}`);
           }
           resolve(null);
           return;
@@ -377,7 +378,7 @@ print(String(format: "%.2f %.0f %u %u %u %u", latencyMs, sampleRate, deviceLaten
     return null;
   }
 
-  start(): void {
+  async start(): Promise<void> {
     if (this.running) return;
     this.running = true;
 
@@ -392,10 +393,15 @@ print(String(format: "%.2f %.0f %u %u %u %u", latencyMs, sampleRate, deviceLaten
       this.log(`[Bridge] platform=${process.platform} arch=${process.arch} os=${os.release()} quantum=${this.config.quantum} defaultBpm=${this.config.defaultBpm} stateHz=${this.config.stateHz}`);
     }
 
-    // Measure native audio output latency at startup + periodic refresh
-    this.measureAudioOutputLatency();
+    // Measure native audio output latency BEFORE accepting clients.
+    // On macOS the Swift subprocess may take 1-3s to compile+run.
+    try {
+      await this.measureAudioOutputLatency();
+    } catch (e) {
+      this.log(`[Bridge] latency measurement failed unexpectedly: ${e}`);
+    }
     this.latencyRefreshInterval = setInterval(() => {
-      this.measureAudioOutputLatency();
+      this.measureAudioOutputLatency().catch(() => {});
     }, this.LATENCY_REFRESH_MS);
 
     // Link callbacks
