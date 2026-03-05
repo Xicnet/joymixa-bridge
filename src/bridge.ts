@@ -50,7 +50,9 @@ export class Bridge extends EventEmitter {
 
   // In-memory log ring buffer for "Copy Logs" feature
   private logBuffer: string[] = [];
-  private readonly LOG_BUFFER_MAX = 500;
+  private readonly LOG_BUFFER_MAX = 2000;
+  // Pinned lines survive ring buffer eviction (platform info, latency result)
+  private pinnedLines: string[] = [];
 
   constructor(config?: Partial<BridgeConfig>) {
     super();
@@ -72,7 +74,13 @@ export class Bridge extends EventEmitter {
   }
 
   public getLogs(): string {
-    return this.logBuffer.join('\n');
+    if (this.pinnedLines.length === 0) return this.logBuffer.join('\n');
+    return this.pinnedLines.join('\n') + '\n---\n' + this.logBuffer.join('\n');
+  }
+
+  private pin(msg: string): void {
+    const line = `${new Date().toISOString()} ${msg}`;
+    this.pinnedLines.push(line);
   }
 
   // ── Native audio output latency measurement ──
@@ -109,9 +117,9 @@ export class Bridge extends EventEmitter {
       if (pw !== null) {
         this.measuredOutputLatency = pw.latencyMs;
         this.latencyMethod = pw.method;
-        if (this.diagLog) {
-          this.log(`[Bridge] Audio latency: platform=linux audioServer=pipewire measuredOutputLatency=${pw.latencyMs.toFixed(1)}ms method=${pw.method}`);
-        }
+        const msg = `[Bridge] Audio latency: platform=linux audioServer=pipewire measuredOutputLatency=${pw.latencyMs.toFixed(1)}ms method=${pw.method}`;
+        this.log(msg);
+        this.pin(msg);
         return;
       }
     } catch { /* fall through */ }
@@ -122,17 +130,17 @@ export class Bridge extends EventEmitter {
       if (alsa !== null) {
         this.measuredOutputLatency = alsa.latencyMs;
         this.latencyMethod = alsa.method;
-        if (this.diagLog) {
-          this.log(`[Bridge] Audio latency: platform=linux audioServer=alsa measuredOutputLatency=${alsa.latencyMs.toFixed(1)}ms method=${alsa.method}`);
-        }
+        const msg = `[Bridge] Audio latency: platform=linux audioServer=alsa measuredOutputLatency=${alsa.latencyMs.toFixed(1)}ms method=${alsa.method}`;
+        this.log(msg);
+        this.pin(msg);
         return;
       }
     } catch { /* fall through */ }
 
     // All methods failed
-    if (this.diagLog) {
-      this.log('[Bridge] Audio latency: measurement failed (no PipeWire/ALSA data)');
-    }
+    const msg = '[Bridge] Audio latency: measurement failed (no PipeWire/ALSA data)';
+    this.log(msg);
+    this.pin(msg);
     this.measuredOutputLatency = null;
     this.latencyMethod = null;
   }
@@ -143,16 +151,20 @@ export class Bridge extends EventEmitter {
       if (result !== null) {
         this.measuredOutputLatency = result.latencyMs;
         this.latencyMethod = result.method;
-        if (this.diagLog) {
-          this.log(`[Bridge] Audio latency: platform=darwin measuredOutputLatency=${result.latencyMs.toFixed(1)}ms method=${result.method}`);
-        }
+        const msg = `[Bridge] Audio latency: platform=darwin measuredOutputLatency=${result.latencyMs.toFixed(1)}ms method=${result.method}`;
+        this.log(msg);
+        this.pin(msg);
         return;
       }
-    } catch { /* fall through */ }
-
-    if (this.diagLog) {
-      this.log('[Bridge] Audio latency: macOS CoreAudio measurement failed');
+    } catch (e) {
+      const msg = `[Bridge] Audio latency: macOS CoreAudio exception: ${e}`;
+      this.log(msg);
+      this.pin(msg);
     }
+
+    const msg = '[Bridge] Audio latency: macOS CoreAudio measurement failed — using fallback (none)';
+    this.log(msg);
+    this.pin(msg);
     this.measuredOutputLatency = null;
     this.latencyMethod = null;
   }
@@ -266,10 +278,10 @@ print(String(format: "%.2f %.0f %u %u %u %u", latencyMs, sampleRate, deviceLaten
     return new Promise((resolve) => {
       execFile('swift', ['-e', swiftCode], { timeout: 5000 }, (err, stdout, stderr) => {
         if (err || !stdout) {
-          if (this.diagLog) {
-            const detail = stderr?.trim() || err?.message || 'no output';
-            this.log(`[Bridge] CoreAudio swift failed: ${detail}`);
-          }
+          const detail = stderr?.trim() || err?.message || 'no output';
+          const msg = `[Bridge] CoreAudio swift failed: ${detail}`;
+          this.log(msg);
+          this.pin(msg);
           resolve(null);
           return;
         }
@@ -389,8 +401,10 @@ print(String(format: "%.2f %.0f %u %u %u %u", latencyMs, sampleRate, deviceLaten
 
     this.log(`[bridge] Link enabled. peers: ${this.link.getNumPeers()}`);
 
-    if (this.diagLog) {
-      this.log(`[Bridge] platform=${process.platform} arch=${process.arch} os=${os.release()} quantum=${this.config.quantum} defaultBpm=${this.config.defaultBpm} stateHz=${this.config.stateHz}`);
+    {
+      const platformInfo = `[Bridge] platform=${process.platform} arch=${process.arch} os=${os.release()} quantum=${this.config.quantum} defaultBpm=${this.config.defaultBpm} stateHz=${this.config.stateHz}`;
+      this.log(platformInfo);
+      this.pin(platformInfo);
     }
 
     // Measure native audio output latency BEFORE accepting clients.
@@ -443,7 +457,9 @@ print(String(format: "%.2f %.0f %u %u %u %u", latencyMs, sampleRate, deviceLaten
         ...helloState,
         numClients: this.clients.size,
         ...(jmxBeat !== undefined && { jmxBeat }),
-        ...(this.measuredOutputLatency !== null && { measuredOutputLatency: this.measuredOutputLatency }),
+        ...(this.measuredOutputLatency !== null
+          ? { measuredOutputLatency: this.measuredOutputLatency, latencyMethod: this.latencyMethod }
+          : { latencyMethod: 'none' }),
       };
 
       if (this.diagLog) {
@@ -483,7 +499,9 @@ print(String(format: "%.2f %.0f %u %u %u %u", latencyMs, sampleRate, deviceLaten
         ...linkState,
         numClients: this.clients.size,
         ...(jmxBeat !== undefined && { jmxBeat }),
-        ...(this.measuredOutputLatency !== null && { measuredOutputLatency: this.measuredOutputLatency }),
+        ...(this.measuredOutputLatency !== null
+          ? { measuredOutputLatency: this.measuredOutputLatency, latencyMethod: this.latencyMethod }
+          : { latencyMethod: 'none' }),
         ts,
       });
       this.emit('tick', { phase: linkState.phase, quantum: linkState.quantum, beat: linkState.beat });
