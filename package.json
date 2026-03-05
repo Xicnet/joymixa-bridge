@@ -1,7 +1,7 @@
 {
   "name": "joymixa-bridge",
   "productName": "Joymixa Bridge",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "description": "Ableton Link bridge and Joymixa-to-Joymixa relay for LAN music sync",
   "main": ".webpack/main",
   "repository": {
