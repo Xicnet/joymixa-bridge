@@ -128,3 +128,50 @@ body {
   color: #00d26a;
   border-color: #00d26a;
 }
+
+/* Beat LEDs */
+.beat-leds {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+  padding: 8px 0;
+}
+
+.beat-led {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  background: #252540;
+  border: 3px solid #3a3a5a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.05s, border-color 0.05s, box-shadow 0.05s;
+}
+
+.beat-num {
+  font-size: 16px;
+  font-weight: 700;
+  color: #505068;
+  transition: color 0.05s;
+}
+
+.beat-led.active {
+  background: #ff1493;
+  border-color: #ff69b4;
+  box-shadow: 0 0 20px rgba(255, 20, 147, 0.6), 0 0 40px rgba(255, 20, 147, 0.3);
+}
+
+.beat-led.active .beat-num {
+  color: #fff;
+}
+
+.beat-led.downbeat {
+  background: #00d26a;
+  border-color: #4dffa0;
+  box-shadow: 0 0 20px rgba(0, 210, 106, 0.6), 0 0 40px rgba(0, 210, 106, 0.3);
+}
+
+.beat-led.downbeat .beat-num {
+  color: #fff;
+}

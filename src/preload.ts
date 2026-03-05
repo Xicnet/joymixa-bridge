@@ -11,4 +11,9 @@ contextBridge.exposeInMainWorld('bridge', {
     ipcRenderer.on('bridge-update', handler);
     return () => ipcRenderer.removeListener('bridge-update', handler);
   },
+  onBeatTick: (callback: (tick: { phase: number; quantum: number; beat: number }) => void) => {
+    const handler = (_event: any, tick: any) => callback(tick);
+    ipcRenderer.on('beat-tick', handler);
+    return () => ipcRenderer.removeListener('beat-tick', handler);
+  },
 });

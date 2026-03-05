@@ -1,6 +1,9 @@
 import { AbletonLink } from '@ktamas77/abletonlink';
 import { WebSocketServer, WebSocket } from 'ws';
 import { EventEmitter } from 'events';
+import { execFile } from 'child_process';
+import { readFile, readdir } from 'fs/promises';
+import * as path from 'path';
 import * as os from 'os';
 
 export interface BridgeConfig {
@@ -39,6 +42,12 @@ export class Bridge extends EventEmitter {
   // Phase-alignment diagnostics — set false before release builds.
   private diagLog = true;
 
+  // Native audio output latency measurement (ms)
+  private measuredOutputLatency: number | null = null;
+  private latencyMethod: string | null = null;
+  private latencyRefreshInterval: ReturnType<typeof setInterval> | null = null;
+  private readonly LATENCY_REFRESH_MS = 30_000;
+
   // In-memory log ring buffer for "Copy Logs" feature
   private logBuffer: string[] = [];
   private readonly LOG_BUFFER_MAX = 500;
@@ -66,6 +75,139 @@ export class Bridge extends EventEmitter {
     return this.logBuffer.join('\n');
   }
 
+  // ── Native audio output latency measurement ──
+
+  /**
+   * Measure OS audio output latency on Linux.
+   * Returns milliseconds or null if measurement fails.
+   *
+   * Strategy:
+   * 1. PipeWire metadata: parse clock.quantum and clock.rate → quantum/rate*1000
+   *    This is the server-side buffer that Chrome's baseLatency doesn't include.
+   * 2. Fallback: ALSA hw_params — read period_size and rate from /proc/asound/
+   * 3. Returns null on non-Linux platforms (macOS/Windows not yet implemented).
+   */
+  private async measureAudioOutputLatency(): Promise<void> {
+    if (process.platform !== 'linux') {
+      this.measuredOutputLatency = null;
+      this.latencyMethod = null;
+      return;
+    }
+
+    // Try PipeWire metadata first (most accurate for PipeWire systems)
+    try {
+      const pw = await this.measureViaPipeWire();
+      if (pw !== null) {
+        this.measuredOutputLatency = pw.latencyMs;
+        this.latencyMethod = pw.method;
+        if (this.diagLog) {
+          this.log(`[Bridge] Audio latency: platform=linux audioServer=pipewire measuredOutputLatency=${pw.latencyMs.toFixed(1)}ms method=${pw.method}`);
+        }
+        return;
+      }
+    } catch { /* fall through */ }
+
+    // Fallback: ALSA hw_params
+    try {
+      const alsa = await this.measureViaAlsa();
+      if (alsa !== null) {
+        this.measuredOutputLatency = alsa.latencyMs;
+        this.latencyMethod = alsa.method;
+        if (this.diagLog) {
+          this.log(`[Bridge] Audio latency: platform=linux audioServer=alsa measuredOutputLatency=${alsa.latencyMs.toFixed(1)}ms method=${alsa.method}`);
+        }
+        return;
+      }
+    } catch { /* fall through */ }
+
+    // All methods failed
+    if (this.diagLog) {
+      this.log('[Bridge] Audio latency: measurement failed (no PipeWire/ALSA data)');
+    }
+    this.measuredOutputLatency = null;
+    this.latencyMethod = null;
+  }
+
+  /**
+   * Query PipeWire settings metadata for clock quantum and rate.
+   * `pw-metadata -n settings` outputs lines like:
+   *   update: id:0 key:'clock.quantum' value:'1024' type:''
+   *   update: id:0 key:'clock.rate' value:'48000' type:''
+   */
+  private measureViaPipeWire(): Promise<{ latencyMs: number; method: string } | null> {
+    return new Promise((resolve) => {
+      execFile('pw-metadata', ['-n', 'settings'], { timeout: 2000 }, (err, stdout) => {
+        if (err || !stdout) { resolve(null); return; }
+
+        let quantum: number | null = null;
+        let rate: number | null = null;
+
+        for (const line of stdout.split('\n')) {
+          // Prefer force-quantum (active override), fall back to clock.quantum (configured default)
+          const qMatch = line.match(/key:'clock\.(?:force-)?quantum'\s+value:'(\d+)'/);
+          if (qMatch) quantum = parseInt(qMatch[1], 10);
+          const rMatch = line.match(/key:'clock\.(?:force-)?rate'\s+value:'(\d+)'/);
+          if (rMatch) rate = parseInt(rMatch[1], 10);
+        }
+
+        if (quantum && rate && quantum > 0 && rate > 0) {
+          const latencyMs = (quantum / rate) * 1000;
+          resolve({ latencyMs, method: `pw-quantum(${quantum}/${rate})` });
+        } else {
+          resolve(null);
+        }
+      });
+    });
+  }
+
+  /**
+   * Read ALSA period_size and rate from /proc/asound/ for active playback streams.
+   * Scans /proc/asound/card{N}/pcm{N}p/sub{N}/hw_params for the first active (non-closed) stream.
+   */
+  private async measureViaAlsa(): Promise<{ latencyMs: number; method: string } | null> {
+    const asoundDir = '/proc/asound';
+    let cards: string[];
+    try {
+      cards = (await readdir(asoundDir)).filter(d => d.startsWith('card'));
+    } catch { return null; }
+
+    for (const card of cards) {
+      let pcms: string[];
+      try {
+        pcms = (await readdir(path.join(asoundDir, card))).filter(d => /^pcm\d+p$/.test(d));
+      } catch { continue; }
+
+      for (const pcm of pcms) {
+        const subDir = path.join(asoundDir, card, pcm);
+        let subs: string[];
+        try {
+          subs = (await readdir(subDir)).filter(d => d.startsWith('sub'));
+        } catch { continue; }
+
+        for (const sub of subs) {
+          const hwPath = path.join(subDir, sub, 'hw_params');
+          try {
+            const content = await readFile(hwPath, 'utf-8');
+            if (content.trim() === 'closed') continue;
+
+            const periodMatch = content.match(/period_size:\s*(\d+)/);
+            const rateMatch = content.match(/rate:\s*(\d+)/);
+            if (periodMatch && rateMatch) {
+              const periodSize = parseInt(periodMatch[1], 10);
+              const rate = parseInt(rateMatch[1], 10);
+              if (periodSize > 0 && rate > 0) {
+                const latencyMs = (periodSize / rate) * 1000;
+                return { latencyMs, method: `alsa-period(${periodSize}/${rate})` };
+              }
+            }
+          } catch { /* skip unreadable */ }
+        }
+      }
+    }
+
+    return null;
+  }
+
   start(): void {
     if (this.running) return;
     this.running = true;
@@ -80,6 +222,12 @@ export class Bridge extends EventEmitter {
     if (this.diagLog) {
       this.log(`[Bridge] platform=${process.platform} arch=${process.arch} os=${os.release()} quantum=${this.config.quantum} defaultBpm=${this.config.defaultBpm} stateHz=${this.config.stateHz}`);
     }
+
+    // Measure native audio output latency at startup + periodic refresh
+    this.measureAudioOutputLatency();
+    this.latencyRefreshInterval = setInterval(() => {
+      this.measureAudioOutputLatency();
+    }, this.LATENCY_REFRESH_MS);
 
     // Link callbacks
     this.link.setTempoCallback((rawTempo: number) => {
@@ -120,6 +268,7 @@ export class Bridge extends EventEmitter {
         ...helloState,
         numClients: this.clients.size,
         ...(jmxBeat !== undefined && { jmxBeat }),
+        ...(this.measuredOutputLatency !== null && { measuredOutputLatency: this.measuredOutputLatency }),
       };
 
       if (this.diagLog) {
@@ -153,13 +302,16 @@ export class Bridge extends EventEmitter {
     this.stateInterval = setInterval(() => {
       const jmxBeat = this.getJmxBeat();
       const ts = Date.now();
+      const linkState = this.getLinkState();
       this.broadcast({
         type: 'state',
-        ...this.getLinkState(),
+        ...linkState,
         numClients: this.clients.size,
         ...(jmxBeat !== undefined && { jmxBeat }),
+        ...(this.measuredOutputLatency !== null && { measuredOutputLatency: this.measuredOutputLatency }),
         ts,
       });
+      this.emit('tick', { phase: linkState.phase, quantum: linkState.quantum, beat: linkState.beat });
     }, 1000 / this.config.stateHz);
 
     this.emit('started');
@@ -172,6 +324,11 @@ export class Bridge extends EventEmitter {
     if (this.stateInterval) {
       clearInterval(this.stateInterval);
       this.stateInterval = null;
+    }
+
+    if (this.latencyRefreshInterval) {
+      clearInterval(this.latencyRefreshInterval);
+      this.latencyRefreshInterval = null;
     }
 
     if (this.wss) {

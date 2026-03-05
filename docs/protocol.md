@@ -60,6 +60,7 @@ Sent immediately when a client connects. Contains a full state snapshot.
   "numPeers": 1,
   "numClients": 2,
   "nextBar0Delay": 345.67,
+  "measuredOutputLatency": 21.3,
   "jmxBeat": 2.5
 }
 ```
@@ -74,6 +75,7 @@ Sent immediately when a client connects. Contains a full state snapshot.
 | `numPeers`     | int     | Number of Link peers (excluding self)                    |
 | `numClients`   | int     | Number of connected WebSocket clients (including this one)|
 | `nextBar0Delay`| float   | Milliseconds until the next bar boundary (beat 0 of bar) |
+| `measuredOutputLatency` | float? | Optional. Native OS audio output latency in milliseconds, measured by the bridge. See §5.2. Omitted if measurement is unavailable (unsupported platform, measurement failed). |
 | `jmxBeat`      | float?  | Optional. Application-level loop beat from first active client that reported one (see `loop-beat` command) |
 
 `numClients` includes the newly connected client.
@@ -95,6 +97,7 @@ Sent to all clients at `stateHz` frequency (default: every 50ms).
   "numPeers": 1,
   "numClients": 3,
   "nextBar0Delay": 345.67,
+  "measuredOutputLatency": 21.3,
   "jmxBeat": 2.5,
   "ts": 1708531200000
 }
@@ -263,6 +266,21 @@ nextBar0Delay  = remainingBeats * msPerBeat
 This allows clients to schedule events aligned to bar boundaries without
 needing direct Link access. A client can `setTimeout(callback, nextBar0Delay)`
 to fire at the start of the next bar.
+
+### `measuredOutputLatency`
+
+Native OS audio output latency in milliseconds, measured by the bridge process.
+Present in `hello` and `state` messages when the bridge can measure it; omitted
+otherwise. The client uses this instead of the browser's unreliable
+`AudioContext.outputLatency` for Link phase-alignment compensation.
+
+**Linux/PipeWire:** PipeWire clock quantum ÷ sample rate × 1000 (e.g. 1024/48000 = 21.3ms).
+Queried via `pw-metadata -n settings`. Falls back to ALSA `period_size` from
+`/proc/asound/card*/pcm*p/sub*/hw_params`.
+
+**macOS/Windows:** Not yet implemented — field is omitted.
+
+Refreshed every 30 seconds to track dynamic buffer resizing.
 
 ### `tempo` rounding
 

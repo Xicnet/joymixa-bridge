@@ -56,8 +56,8 @@ function createStatusWindow(): void {
   }
 
   statusWindow = new BrowserWindow({
-    width: 320,
-    height: 310,
+    width: 360,
+    height: 480,
     resizable: false,
     maximizable: false,
     fullscreenable: false,
@@ -191,6 +191,11 @@ function startBridge(): void {
   bridge.on('tempo', () => notifyRenderer());
   bridge.on('playing', () => notifyRenderer());
   bridge.on('clients', () => notifyRenderer());
+  bridge.on('tick', (tick: { phase: number; quantum: number; beat: number }) => {
+    if (statusWindow && !statusWindow.isDestroyed() && !statusWindow.webContents.isDestroyed()) {
+      statusWindow.webContents.send('beat-tick', tick);
+    }
+  });
 
   bridge.start();
 }

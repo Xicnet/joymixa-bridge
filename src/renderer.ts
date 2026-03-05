@@ -7,6 +7,7 @@ interface BridgeAPI {
   getLogs: () => Promise<string>;
   closeWindow: () => Promise<void>;
   onUpdate: (callback: (state: any) => void) => () => void;
+  onBeatTick: (callback: (tick: { phase: number; quantum: number; beat: number }) => void) => () => void;
 }
 
 declare global {
@@ -64,6 +65,24 @@ async function init(): Promise<void> {
   // Listen for live updates from main process
   window.bridge.onUpdate((updatedState) => {
     updateUI(updatedState);
+  });
+
+  // Beat LEDs — track which beat is active based on Link phase
+  let prevBeat = -1;
+  const beatLeds = [0, 1, 2, 3].map(i => $(`beat-${i}`));
+
+  window.bridge.onBeatTick((tick) => {
+    const currentBeat = Math.floor(tick.phase);
+    if (currentBeat === prevBeat) return;
+    prevBeat = currentBeat;
+
+    for (let i = 0; i < beatLeds.length; i++) {
+      const led = beatLeds[i];
+      led.classList.remove('active', 'downbeat');
+      if (i === currentBeat) {
+        led.classList.add(i === 0 ? 'downbeat' : 'active');
+      }
+    }
   });
 }
 
