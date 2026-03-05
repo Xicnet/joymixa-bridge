@@ -333,8 +333,10 @@ print(String(format: "%.2f %.0f %u %u %u %u", latencyMs, sampleRate, deviceLaten
         }
 
         if (quantum && rate && quantum > 0 && rate > 0) {
-          const latencyMs = (quantum / rate) * 1000;
-          resolve({ latencyMs, method: `pw-quantum(${quantum}/${rate})` });
+          // PipeWire double-buffers: one period being filled by the graph,
+          // one being consumed by the ALSA sink. Real pipeline latency is ≥ 2× quantum.
+          const latencyMs = (quantum / rate) * 1000 * 2;
+          resolve({ latencyMs, method: `pw-quantum(${quantum}/${rate}×2)` });
         } else {
           resolve(null);
         }

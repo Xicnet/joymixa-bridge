@@ -184,6 +184,26 @@ class BridgeService : Service() {
             Log.i(TAG, "Audio latency: ${"%.1f".format(bufferMs)}ms (buffer estimate ${framesPerBuf}*2/$sampleRate, fallback)")
         }
 
+        // Cross-validation: when T1 and T2 disagree by >2x, T1 is measuring a
+        // different audio path than Chrome uses (e.g. Samsung Exynos legacy mixer).
+        // Fall back to T3-based estimate which is path-independent.
+        if (reflectionResult != null && timestampResult != null) {
+            val ratio = if (reflectionResult > timestampResult)
+                reflectionResult / timestampResult else timestampResult / reflectionResult
+            if (ratio > 2.0) {
+                val crossVal = bufferMs * 3.0  // conservative: 3× HAL double-buffer estimate
+                diag.append(" | XVAL: T1/T2 ratio=${"%.1f".format(ratio)}x, override=${
+                    "%.1f".format(crossVal)}ms (T3×3)")
+                measuredOutputLatency = crossVal
+                latencyMethod = "cross-validated"
+                Log.w(TAG, "Cross-validation: T1=${"%.0f".format(reflectionResult)}ms T2=${
+                    "%.0f".format(timestampResult)}ms disagree (ratio=${"%.1f".format(ratio)}x), " +
+                    "using T3×3=${"%.1f".format(crossVal)}ms")
+            } else {
+                diag.append(" | XVAL: T1/T2 agree (ratio=${"%.1f".format(ratio)}x), keeping T1")
+            }
+        }
+
         latencyDiagnostics = diag.toString()
         Log.i(TAG, "Latency diagnostics: $latencyDiagnostics")
     }
@@ -191,6 +211,11 @@ class BridgeService : Service() {
     /**
      * Tier 2: Create a silent AudioTrack, write silence to warm it up, then use
      * the public AudioTrack.getTimestamp() API to compute output latency.
+     *
+     * Note: this measures the latency of a *separate* AudioTrack, not Chrome's
+     * actual AAudio path. On Samsung Exynos devices the value can be wildly
+     * inflated due to extra AudioFlinger buffering. Used for diagnostics only;
+     * cross-validation logic decides whether to trust it.
      *
      * Returns latency in ms, or null if timestamps are not available.
      */
