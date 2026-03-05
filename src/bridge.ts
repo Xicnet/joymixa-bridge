@@ -606,7 +606,7 @@ print(String(format: "%.2f %.0f %u %u %u %u", latencyMs, sampleRate, deviceLaten
       };
 
       if (this.diagLog) {
-        this.log(`[Bridge:hello] sending: tempo=${helloState.tempo.toFixed(2)} isPlaying=${helloState.isPlaying} beat=${helloState.beat.toFixed(3)} phase=${helloState.phase.toFixed(3)}/${helloState.quantum} nextBar0Delay=${helloState.nextBar0Delay.toFixed(1)}ms peers=${helloState.numPeers} clients=${this.clients.size}`);
+        this.log(`[Bridge:hello] sending: tempo=${helloState.tempo.toFixed(2)} isPlaying=${helloState.isPlaying} beat=${helloState.beat.toFixed(3)} phase=${helloState.phase.toFixed(3)}/${helloState.quantum} nextBar0Delay=${helloState.nextBar0Delay.toFixed(1)}ms peers=${helloState.numPeers} clients=${this.clients.size} measuredOutputLatency=${this.measuredOutputLatency?.toFixed(1) ?? 'none'}ms latencyMethod=${this.latencyMethod ?? 'none'}`);
       }
 
       ws.send(JSON.stringify(helloMsg));
