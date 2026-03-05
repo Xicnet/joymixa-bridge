@@ -59,6 +59,8 @@ class BridgeService : Service() {
     // Native audio output latency measurement (ms)
     @Volatile private var measuredOutputLatency: Double? = null
     private var latencyMethod: String? = null
+    // Full tier-by-tier diagnostic log for frontend visibility
+    private var latencyDiagnostics: String? = null
 
     override fun onBind(intent: Intent?): IBinder = binder
 
@@ -142,30 +144,48 @@ class BridgeService : Service() {
         val sampleRate = sampleRateStr?.toIntOrNull() ?: 48000
         val framesPerBuf = framesPerBufStr?.toIntOrNull() ?: 256
 
+        val diag = StringBuilder()
+        diag.append("sr=$sampleRate fpb=$framesPerBuf | ")
+
         // Tier 1: AudioTrack.getLatency() via reflection (direct HAL query, same as Media3)
+        // Returns pipeline-only latency (raw getLatency minus track buffer, like ExoPlayer)
         val reflectionResult = measureViaGetLatencyReflection(sampleRate)
         if (reflectionResult != null) {
+            diag.append("T1(pipeline)=${"%.0f".format(reflectionResult)}ms USED")
             measuredOutputLatency = reflectionResult
             latencyMethod = "AudioTrack.getLatency"
-            Log.i(TAG, "Audio latency: ${"%.0f".format(reflectionResult)}ms (AudioTrack.getLatency reflection, sr=$sampleRate)")
-            return
+            Log.i(TAG, "Audio latency: ${"%.0f".format(reflectionResult)}ms (AudioTrack.getLatency pipeline, sr=$sampleRate)")
+        } else {
+            diag.append("T1(getLatency)=FAIL")
         }
 
-        // Tier 2: Silent AudioTrack probe + getTimestamp() (public API fallback)
+        // Always try tier 2 for diagnostics (even if tier 1 succeeded)
         val timestampResult = measureViaTimestampProbe(sampleRate)
         if (timestampResult != null) {
-            measuredOutputLatency = timestampResult
-            latencyMethod = "AudioTimestamp"
-            Log.i(TAG, "Audio latency: ${"%.1f".format(timestampResult)}ms (AudioTimestamp probe, sr=$sampleRate)")
-            return
+            diag.append(" | T2(timestamp)=${"%.1f".format(timestampResult)}ms")
+            if (reflectionResult == null) {
+                diag.append(" USED")
+                measuredOutputLatency = timestampResult
+                latencyMethod = "AudioTimestamp"
+                Log.i(TAG, "Audio latency: ${"%.1f".format(timestampResult)}ms (AudioTimestamp probe, sr=$sampleRate)")
+            }
+        } else {
+            diag.append(" | T2(timestamp)=FAIL")
         }
 
-        // Tier 3: Buffer estimation (public API, rough)
-        val pipelineFrames = framesPerBuf * 2  // HAL double-buffering estimate
+        // Tier 3: Buffer estimation (always computed for reference)
+        val pipelineFrames = framesPerBuf * 2
         val bufferMs = pipelineFrames.toDouble() / sampleRate * 1000.0
-        measuredOutputLatency = bufferMs
-        latencyMethod = "buffer-estimate"
-        Log.i(TAG, "Audio latency: ${"%.1f".format(bufferMs)}ms (buffer estimate ${framesPerBuf}*2/$sampleRate, fallback)")
+        diag.append(" | T3(buffer)=${"%.1f".format(bufferMs)}ms")
+        if (reflectionResult == null && timestampResult == null) {
+            diag.append(" USED")
+            measuredOutputLatency = bufferMs
+            latencyMethod = "buffer-estimate"
+            Log.i(TAG, "Audio latency: ${"%.1f".format(bufferMs)}ms (buffer estimate ${framesPerBuf}*2/$sampleRate, fallback)")
+        }
+
+        latencyDiagnostics = diag.toString()
+        Log.i(TAG, "Latency diagnostics: $latencyDiagnostics")
     }
 
     /**
@@ -244,7 +264,14 @@ class BridgeService : Service() {
      * Tier 1: AudioTrack.getLatency() via reflection.
      * Hidden API (unsupported tier) — same pattern used by Google's Media3/ExoPlayer.
      * Direct HAL query: instant, no warmup, no timing artifacts.
-     * Returns total pipeline latency in ms, or null if the method is unavailable.
+     *
+     * AOSP returns: mAfLatency + (1000 * mFrameCount) / mSampleRate
+     * where mFrameCount is THIS track's buffer — not Chrome's buffer.
+     * We subtract the track buffer contribution to isolate mAfLatency
+     * (the shared AudioFlinger→HAL→speaker pipeline), same as ExoPlayer:
+     *   latencyUs = getLatency() * 1000 - bufferSizeUs
+     *
+     * Returns pipeline latency in ms (excluding track buffer), or null if unavailable.
      */
     private fun measureViaGetLatencyReflection(sampleRate: Int): Double? {
         try {
@@ -264,9 +291,16 @@ class BridgeService : Service() {
             )
             try {
                 val method = AudioTrack::class.java.getMethod("getLatency")
-                val latencyMs = method.invoke(track) as Int
-                if (latencyMs in 1..500) {
-                    return latencyMs.toDouble()
+                val rawLatencyMs = method.invoke(track) as Int
+                if (rawLatencyMs in 1..500) {
+                    // Subtract this track's buffer duration to isolate mAfLatency.
+                    // minBuf is in bytes; for 16-bit stereo, frame = 4 bytes.
+                    val frameSizeBytes = 4 // 2 bytes/sample * 2 channels
+                    val trackBufferFrames = minBuf / frameSizeBytes
+                    val trackBufferMs = trackBufferFrames.toDouble() / sampleRate * 1000.0
+                    val pipelineMs = rawLatencyMs.toDouble() - trackBufferMs
+                    Log.d(TAG, "getLatency raw=${rawLatencyMs}ms - trackBuf=${"%.1f".format(trackBufferMs)}ms (${trackBufferFrames}fr) = pipeline=${"%.1f".format(pipelineMs)}ms")
+                    return if (pipelineMs >= 1.0) pipelineMs else rawLatencyMs.toDouble()
                 }
             } catch (e: Exception) {
                 Log.d(TAG, "AudioTrack.getLatency() not available: ${e.message}")
@@ -346,6 +380,8 @@ class BridgeService : Service() {
             val extra = mutableMapOf<String, Any?>()
             if (jmxBeat != null) extra["jmxBeat"] = jmxBeat
             measuredOutputLatency?.let { extra["measuredOutputLatency"] = it }
+            extra["latencyMethod"] = latencyMethod ?: "none"
+            latencyDiagnostics?.let { extra["latencyDiagnostics"] = it }
             conn.send(state.toJson("hello", extra))
 
             notifyStateUpdate()
@@ -480,6 +516,7 @@ class BridgeService : Service() {
                 )
                 if (jmxBeat != null) extra["jmxBeat"] = jmxBeat
                 measuredOutputLatency?.let { extra["measuredOutputLatency"] = it }
+                extra["latencyMethod"] = latencyMethod ?: "none"
                 broadcast(state.toJson("state", extra))
             }
         }
