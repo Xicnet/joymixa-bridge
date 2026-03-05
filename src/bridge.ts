@@ -90,8 +90,8 @@ export class Bridge extends EventEmitter {
    * Returns milliseconds or null if measurement fails.
    *
    * Platform strategies:
-   * - Linux/PipeWire: parse clock.quantum and clock.rate from pw-metadata
-   * - Linux/ALSA: read period_size and rate from /proc/asound/ (fallback)
+   * - Linux: Sample ALSA /proc/asound delay field (primary), hw_params ×2 (fallback),
+   *   PipeWire quantum ×2 (last resort). See docs/research/linux-audio-pipeline-latency.md
    * - macOS: CoreAudio property query via swift subprocess
    *   (kAudioDevicePropertyLatency + kAudioStreamPropertyLatency
    *    + kAudioDevicePropertySafetyOffset + bufferFrameSize) / sampleRate
@@ -111,26 +111,46 @@ export class Bridge extends EventEmitter {
   }
 
   private async measureAudioOutputLatencyLinux(): Promise<void> {
-    // Try PipeWire metadata first (most accurate for PipeWire systems)
+    // Primary: sample ALSA delay field from /proc/asound (direct measurement)
+    // This works with any audio server (PipeWire, PulseAudio, JACK, bare ALSA).
+    // See docs/research/linux-audio-pipeline-latency.md for full analysis.
     try {
-      const pw = await this.measureViaPipeWire();
-      if (pw !== null) {
-        this.measuredOutputLatency = pw.latencyMs;
-        this.latencyMethod = pw.method;
-        const msg = `[Bridge] Audio latency: platform=linux audioServer=pipewire measuredOutputLatency=${pw.latencyMs.toFixed(1)}ms method=${pw.method}`;
+      const alsaDelay = await this.measureViaAlsaDelay();
+      if (alsaDelay !== null) {
+        this.measuredOutputLatency = alsaDelay.latencyMs;
+        this.latencyMethod = alsaDelay.method;
+        const msg = `[Bridge] Audio latency: platform=linux measuredOutputLatency=${alsaDelay.latencyMs.toFixed(1)}ms method=${alsaDelay.method}`;
+        this.log(msg);
+        this.pin(msg);
+
+        // Cross-check with PipeWire if available (log only, doesn't change result)
+        this.crossCheckPipeWire(alsaDelay.latencyMs);
+        return;
+      }
+    } catch { /* fall through */ }
+
+    // Fallback: ALSA hw_params with ×2 period heuristic
+    // Used when no playback stream is RUNNING (audio server suspended the device).
+    // The ×2 factor accounts for PipeWire's target-fill + write-quantum model.
+    try {
+      const alsaHw = await this.measureViaAlsaHwParams();
+      if (alsaHw !== null) {
+        this.measuredOutputLatency = alsaHw.latencyMs;
+        this.latencyMethod = alsaHw.method;
+        const msg = `[Bridge] Audio latency: platform=linux measuredOutputLatency=${alsaHw.latencyMs.toFixed(1)}ms method=${alsaHw.method} (fallback: no RUNNING stream)`;
         this.log(msg);
         this.pin(msg);
         return;
       }
     } catch { /* fall through */ }
 
-    // Fallback: ALSA hw_params
+    // Last resort: PipeWire quantum (requires pw-metadata CLI)
     try {
-      const alsa = await this.measureViaAlsa();
-      if (alsa !== null) {
-        this.measuredOutputLatency = alsa.latencyMs;
-        this.latencyMethod = alsa.method;
-        const msg = `[Bridge] Audio latency: platform=linux audioServer=alsa measuredOutputLatency=${alsa.latencyMs.toFixed(1)}ms method=${alsa.method}`;
+      const pw = await this.measureViaPipeWire();
+      if (pw !== null) {
+        this.measuredOutputLatency = pw.latencyMs;
+        this.latencyMethod = pw.method;
+        const msg = `[Bridge] Audio latency: platform=linux measuredOutputLatency=${pw.latencyMs.toFixed(1)}ms method=${pw.method} (fallback: no ALSA data)`;
         this.log(msg);
         this.pin(msg);
         return;
@@ -138,7 +158,7 @@ export class Bridge extends EventEmitter {
     } catch { /* fall through */ }
 
     // All methods failed
-    const msg = '[Bridge] Audio latency: measurement failed (no PipeWire/ALSA data)';
+    const msg = '[Bridge] Audio latency: measurement failed (no ALSA/PipeWire data)';
     this.log(msg);
     this.pin(msg);
     this.measuredOutputLatency = null;
@@ -345,15 +365,35 @@ print(String(format: "%.2f %.0f %u %u %u %u", latencyMs, sampleRate, deviceLaten
   }
 
   /**
-   * Read ALSA period_size and rate from /proc/asound/ for active playback streams.
-   * Scans /proc/asound/card{N}/pcm{N}p/sub{N}/hw_params for the first active (non-closed) stream.
+   * Cross-check: compare ALSA-measured latency with PipeWire quantum.
+   * Log-only — does not change the measured value.
    */
-  private async measureViaAlsa(): Promise<{ latencyMs: number; method: string } | null> {
+  private crossCheckPipeWire(alsaLatencyMs: number): void {
+    this.measureViaPipeWire().then(pw => {
+      if (!pw) return;
+      const diff = Math.abs(alsaLatencyMs - pw.latencyMs);
+      const pct = (diff / alsaLatencyMs) * 100;
+      if (pct > 20) {
+        this.log(`[Bridge] Latency cross-check: ALSA=${alsaLatencyMs.toFixed(1)}ms vs PipeWire=${pw.latencyMs.toFixed(1)}ms — ${pct.toFixed(0)}% discrepancy`);
+      } else if (this.diagLog) {
+        this.log(`[Bridge] Latency cross-check: ALSA=${alsaLatencyMs.toFixed(1)}ms ≈ PipeWire=${pw.latencyMs.toFixed(1)}ms — consistent`);
+      }
+    }).catch(() => {
+      if (this.diagLog) this.log('[Bridge] Latency cross-check: pw-metadata not available');
+    });
+  }
+
+  /**
+   * Find all ALSA playback substream paths under /proc/asound/.
+   * Returns paths like '/proc/asound/card0/pcm0p/sub0'.
+   */
+  private async findAlsaPlaybackPaths(): Promise<string[]> {
     const asoundDir = '/proc/asound';
+    const paths: string[] = [];
     let cards: string[];
     try {
       cards = (await readdir(asoundDir)).filter(d => d.startsWith('card'));
-    } catch { return null; }
+    } catch { return paths; }
 
     for (const card of cards) {
       let pcms: string[];
@@ -369,24 +409,125 @@ print(String(format: "%.2f %.0f %u %u %u %u", latencyMs, sampleRate, deviceLaten
         } catch { continue; }
 
         for (const sub of subs) {
-          const hwPath = path.join(subDir, sub, 'hw_params');
-          try {
-            const content = await readFile(hwPath, 'utf-8');
-            if (content.trim() === 'closed') continue;
-
-            const periodMatch = content.match(/period_size:\s*(\d+)/);
-            const rateMatch = content.match(/rate:\s*(\d+)/);
-            if (periodMatch && rateMatch) {
-              const periodSize = parseInt(periodMatch[1], 10);
-              const rate = parseInt(rateMatch[1], 10);
-              if (periodSize > 0 && rate > 0) {
-                const latencyMs = (periodSize / rate) * 1000;
-                return { latencyMs, method: `alsa-period(${periodSize}/${rate})` };
-              }
-            }
-          } catch { /* skip unreadable */ }
+          paths.push(path.join(subDir, sub));
         }
       }
+    }
+    return paths;
+  }
+
+  /**
+   * Sample the ALSA delay field from /proc/asound/.../status for RUNNING streams.
+   *
+   * The delay field reports actual frames in the playback buffer (appl_ptr - hw_ptr).
+   * Under PipeWire, it oscillates between 1× and 2× quantum because PipeWire
+   * maintains a 1-quantum target fill and writes 1 quantum per cycle.
+   * The maximum delay is the correct compensation value.
+   *
+   * Takes ~20 samples over ~200ms, returns the maximum.
+   * See docs/research/linux-audio-pipeline-latency.md for the full analysis.
+   */
+  private async measureViaAlsaDelay(): Promise<{ latencyMs: number; method: string } | null> {
+    const subPaths = await this.findAlsaPlaybackPaths();
+    if (subPaths.length === 0) return null;
+
+    // Find the first RUNNING playback stream and get its rate
+    let runningStatusPath: string | null = null;
+    let rate = 0;
+    let deviceId = '';
+
+    for (const sub of subPaths) {
+      try {
+        const status = await readFile(path.join(sub, 'status'), 'utf-8');
+        if (!status.startsWith('state: RUNNING')) continue;
+
+        const hwContent = await readFile(path.join(sub, 'hw_params'), 'utf-8');
+        const rateMatch = hwContent.match(/rate:\s*(\d+)/);
+        if (!rateMatch) continue;
+
+        rate = parseInt(rateMatch[1], 10);
+        if (rate <= 0) continue;
+
+        runningStatusPath = path.join(sub, 'status');
+        // Extract card/pcm ID for logging (e.g. "card0/pcm0p/sub0")
+        const parts = sub.split('/');
+        deviceId = parts.slice(-3).join('/');
+        break;
+      } catch { continue; }
+    }
+
+    if (!runningStatusPath || rate <= 0) return null;
+
+    // Sample the delay field ~20 times over ~200ms
+    const SAMPLE_COUNT = 20;
+    const SAMPLE_INTERVAL_MS = 10;
+    const delays: number[] = [];
+
+    for (let i = 0; i < SAMPLE_COUNT; i++) {
+      try {
+        const status = await readFile(runningStatusPath, 'utf-8');
+        const delayMatch = status.match(/delay\s*:\s*(\d+)/);
+        if (delayMatch) {
+          delays.push(parseInt(delayMatch[1], 10));
+        }
+      } catch { /* stream may have closed mid-sampling */ }
+
+      if (i < SAMPLE_COUNT - 1) {
+        await new Promise(r => setTimeout(r, SAMPLE_INTERVAL_MS));
+      }
+    }
+
+    if (delays.length < 5) return null; // Not enough samples for reliable max
+
+    const maxDelay = Math.max(...delays);
+    const minDelay = Math.min(...delays);
+    const latencyMs = (maxDelay / rate) * 1000;
+    const minMs = (minDelay / rate) * 1000;
+
+    if (this.diagLog) {
+      const mean = delays.reduce((a, b) => a + b, 0) / delays.length;
+      this.log(`[Bridge] ALSA delay sampling: device=${deviceId} rate=${rate} samples=${delays.length} min=${minDelay}(${minMs.toFixed(1)}ms) max=${maxDelay}(${latencyMs.toFixed(1)}ms) mean=${(mean / rate * 1000).toFixed(1)}ms`);
+    }
+
+    return { latencyMs, method: `alsa-delay(max=${maxDelay}/${rate}@${deviceId})` };
+  }
+
+  /**
+   * Fallback: read ALSA hw_params for period_size and rate.
+   * Uses period_size × 2 as a heuristic for typical PipeWire/PulseAudio buffering.
+   *
+   * The ×2 factor comes from PipeWire's buffering model: target fill of 1 quantum
+   * plus 1 quantum written per cycle = 2 quanta maximum pipeline delay.
+   * This is a heuristic — the delay sampling method (measureViaAlsaDelay) is preferred.
+   */
+  private async measureViaAlsaHwParams(): Promise<{ latencyMs: number; method: string } | null> {
+    const subPaths = await this.findAlsaPlaybackPaths();
+
+    for (const sub of subPaths) {
+      try {
+        const content = await readFile(path.join(sub, 'hw_params'), 'utf-8');
+        if (content.trim() === 'closed') continue;
+
+        const periodMatch = content.match(/period_size:\s*(\d+)/);
+        const rateMatch = content.match(/rate:\s*(\d+)/);
+        const bufferMatch = content.match(/buffer_size:\s*(\d+)/);
+        if (periodMatch && rateMatch) {
+          const periodSize = parseInt(periodMatch[1], 10);
+          const rate = parseInt(rateMatch[1], 10);
+          const bufferSize = bufferMatch ? parseInt(bufferMatch[1], 10) : 0;
+          if (periodSize > 0 && rate > 0) {
+            const latencyMs = (periodSize * 2 / rate) * 1000;
+            const parts = sub.split('/');
+            const deviceId = parts.slice(-3).join('/');
+
+            if (this.diagLog) {
+              this.log(`[Bridge] ALSA hw_params: device=${deviceId} period=${periodSize} buffer=${bufferSize} rate=${rate} → ${latencyMs.toFixed(1)}ms (period×2)`);
+            }
+
+            return { latencyMs, method: `alsa-hwparams(${periodSize}×2/${rate}@${deviceId})` };
+          }
+        }
+      } catch { continue; }
     }
 
     return null;
