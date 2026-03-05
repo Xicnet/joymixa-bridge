@@ -278,7 +278,11 @@ otherwise. The client uses this instead of the browser's unreliable
 Queried via `pw-metadata -n settings`. Falls back to ALSA `period_size` from
 `/proc/asound/card*/pcm*p/sub*/hw_params`.
 
-**macOS/Windows:** Not yet implemented — field is omitted.
+**macOS:** CoreAudio property query via `swift` subprocess. Sums
+`kAudioDevicePropertyLatency + kAudioStreamPropertyLatency +
+kAudioDevicePropertySafetyOffset + bufferFrameSize` in frames, divided by sample rate.
+
+**Windows:** Not yet implemented — field is omitted.
 
 Refreshed every 30 seconds to track dynamic buffer resizing.
 

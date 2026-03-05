@@ -7,6 +7,9 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.media.AudioFormat
+import android.media.AudioManager
+import android.media.AudioTrack
 import android.net.wifi.WifiManager
 import android.os.Binder
 import android.os.IBinder
@@ -52,12 +55,16 @@ class BridgeService : Service() {
     private var multicastLock: WifiManager.MulticastLock? = null
     private var wakeLock: PowerManager.WakeLock? = null
 
+    // Native audio output latency measurement (ms)
+    private var measuredOutputLatency: Double? = null
+
     override fun onBind(intent: Intent?): IBinder = binder
 
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
         acquireLocks()
+        measureAudioOutputLatency()
         startLink()
         startWebSocketServer()
         startStateBroadcastLoop()
@@ -97,6 +104,61 @@ class BridgeService : Service() {
             numClients = synchronized(clientsLock) { clients.size },
             nextBar0Delay = remainingBeats * msPerBeat
         )
+    }
+
+    // ─── Audio latency measurement ───
+
+    /**
+     * Measure the native audio output latency.
+     *
+     * Strategy:
+     * 1. AudioTrack.getLatency() via reflection — hidden API that returns the total
+     *    pipeline latency in ms (HAL + buffer + mixer). Available since API 19.
+     * 2. Fallback: AudioManager native buffer frames / sample rate — gives one buffer
+     *    period, which underestimates but is better than nothing.
+     */
+    private fun measureAudioOutputLatency() {
+        val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+        val sampleRateStr = audioManager.getProperty(AudioManager.PROPERTY_OUTPUT_SAMPLE_RATE)
+        val framesPerBufStr = audioManager.getProperty(AudioManager.PROPERTY_OUTPUT_FRAMES_PER_BUFFER)
+        val sampleRate = sampleRateStr?.toIntOrNull() ?: 48000
+        val framesPerBuf = framesPerBufStr?.toIntOrNull() ?: 256
+
+        // Try AudioTrack.getLatency() via reflection (hidden API)
+        try {
+            val minBuf = AudioTrack.getMinBufferSize(
+                sampleRate, AudioFormat.CHANNEL_OUT_STEREO, AudioFormat.ENCODING_PCM_16BIT
+            )
+            @Suppress("DEPRECATION")
+            val track = AudioTrack(
+                AudioManager.STREAM_MUSIC,
+                sampleRate,
+                AudioFormat.CHANNEL_OUT_STEREO,
+                AudioFormat.ENCODING_PCM_16BIT,
+                minBuf,
+                AudioTrack.MODE_STREAM
+            )
+            try {
+                val method = AudioTrack::class.java.getMethod("getLatency")
+                val latencyMs = method.invoke(track) as Int
+                if (latencyMs in 1..500) {
+                    measuredOutputLatency = latencyMs.toDouble()
+                    Log.i(TAG, "Audio latency: ${latencyMs}ms (AudioTrack.getLatency, sr=$sampleRate)")
+                    return
+                }
+            } catch (e: Exception) {
+                Log.d(TAG, "AudioTrack.getLatency() not available: ${e.message}")
+            } finally {
+                track.release()
+            }
+        } catch (e: Exception) {
+            Log.d(TAG, "AudioTrack creation failed: ${e.message}")
+        }
+
+        // Fallback: native buffer size (one period)
+        val bufferMs = framesPerBuf.toDouble() / sampleRate * 1000.0
+        measuredOutputLatency = bufferMs
+        Log.i(TAG, "Audio latency: ${"%.1f".format(bufferMs)}ms (native buffer $framesPerBuf/$sampleRate, fallback)")
     }
 
     // ─── Link ───
@@ -165,6 +227,7 @@ class BridgeService : Service() {
             val jmxBeat = getJmxBeat()
             val extra = mutableMapOf<String, Any?>()
             if (jmxBeat != null) extra["jmxBeat"] = jmxBeat
+            measuredOutputLatency?.let { extra["measuredOutputLatency"] = it }
             conn.send(state.toJson("hello", extra))
 
             notifyStateUpdate()
@@ -298,6 +361,7 @@ class BridgeService : Service() {
                     "ts" to System.currentTimeMillis()
                 )
                 if (jmxBeat != null) extra["jmxBeat"] = jmxBeat
+                measuredOutputLatency?.let { extra["measuredOutputLatency"] = it }
                 broadcast(state.toJson("state", extra))
             }
         }

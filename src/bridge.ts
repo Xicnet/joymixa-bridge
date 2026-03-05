@@ -78,22 +78,31 @@ export class Bridge extends EventEmitter {
   // ── Native audio output latency measurement ──
 
   /**
-   * Measure OS audio output latency on Linux.
+   * Measure OS audio output latency natively.
    * Returns milliseconds or null if measurement fails.
    *
-   * Strategy:
-   * 1. PipeWire metadata: parse clock.quantum and clock.rate → quantum/rate*1000
-   *    This is the server-side buffer that Chrome's baseLatency doesn't include.
-   * 2. Fallback: ALSA hw_params — read period_size and rate from /proc/asound/
-   * 3. Returns null on non-Linux platforms (macOS/Windows not yet implemented).
+   * Platform strategies:
+   * - Linux/PipeWire: parse clock.quantum and clock.rate from pw-metadata
+   * - Linux/ALSA: read period_size and rate from /proc/asound/ (fallback)
+   * - macOS: CoreAudio property query via swift subprocess
+   *   (kAudioDevicePropertyLatency + kAudioStreamPropertyLatency
+   *    + kAudioDevicePropertySafetyOffset + bufferFrameSize) / sampleRate
+   * - Windows: not yet implemented
    */
   private async measureAudioOutputLatency(): Promise<void> {
-    if (process.platform !== 'linux') {
+    const platform = process.platform;
+
+    if (platform === 'linux') {
+      await this.measureAudioOutputLatencyLinux();
+    } else if (platform === 'darwin') {
+      await this.measureAudioOutputLatencyMac();
+    } else {
       this.measuredOutputLatency = null;
       this.latencyMethod = null;
-      return;
     }
+  }
 
+  private async measureAudioOutputLatencyLinux(): Promise<void> {
     // Try PipeWire metadata first (most accurate for PipeWire systems)
     try {
       const pw = await this.measureViaPipeWire();
@@ -126,6 +135,166 @@ export class Bridge extends EventEmitter {
     }
     this.measuredOutputLatency = null;
     this.latencyMethod = null;
+  }
+
+  private async measureAudioOutputLatencyMac(): Promise<void> {
+    try {
+      const result = await this.measureViaCoreAudio();
+      if (result !== null) {
+        this.measuredOutputLatency = result.latencyMs;
+        this.latencyMethod = result.method;
+        if (this.diagLog) {
+          this.log(`[Bridge] Audio latency: platform=darwin measuredOutputLatency=${result.latencyMs.toFixed(1)}ms method=${result.method}`);
+        }
+        return;
+      }
+    } catch { /* fall through */ }
+
+    if (this.diagLog) {
+      this.log('[Bridge] Audio latency: macOS CoreAudio measurement failed');
+    }
+    this.measuredOutputLatency = null;
+    this.latencyMethod = null;
+  }
+
+  /**
+   * Query macOS CoreAudio for default output device latency.
+   * Spawns a small Swift script that queries:
+   * - kAudioDevicePropertyLatency (device frames)
+   * - kAudioStreamPropertyLatency (stream frames)
+   * - kAudioDevicePropertySafetyOffset (safety frames)
+   * - kAudioDevicePropertyBufferFrameSize (buffer frames)
+   * - kAudioDevicePropertyNominalSampleRate
+   * Total latency = (device + stream + safety + buffer) / sampleRate * 1000
+   */
+  private measureViaCoreAudio(): Promise<{ latencyMs: number; method: string } | null> {
+    const swiftCode = `
+import CoreAudio
+import Foundation
+
+var defaultDeviceID = AudioObjectID(kAudioObjectSystemObject)
+var deviceID = AudioDeviceID(0)
+var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+
+// Get default output device
+var addr = AudioObjectPropertyAddress(
+  mSelector: kAudioHardwarePropertyDefaultOutputDevice,
+  mScope: kAudioObjectPropertyScopeGlobal,
+  mElement: kAudioObjectPropertyElementMain
+)
+guard AudioObjectGetPropertyData(defaultDeviceID, &addr, 0, nil, &size, &deviceID) == noErr else {
+  fputs("ERR: no default output device\\n", stderr)
+  exit(1)
+}
+
+// Device latency (frames)
+var deviceLatency = UInt32(0)
+size = UInt32(MemoryLayout<UInt32>.size)
+addr.mSelector = kAudioDevicePropertyLatency
+addr.mScope = kAudioDevicePropertyScopeOutput
+guard AudioObjectGetPropertyData(deviceID, &addr, 0, nil, &size, &deviceLatency) == noErr else {
+  fputs("ERR: device latency\\n", stderr)
+  exit(1)
+}
+
+// Safety offset (frames)
+var safetyOffset = UInt32(0)
+size = UInt32(MemoryLayout<UInt32>.size)
+addr.mSelector = kAudioDevicePropertySafetyOffset
+guard AudioObjectGetPropertyData(deviceID, &addr, 0, nil, &size, &safetyOffset) == noErr else {
+  fputs("ERR: safety offset\\n", stderr)
+  exit(1)
+}
+
+// Buffer frame size
+var bufferFrames = UInt32(0)
+size = UInt32(MemoryLayout<UInt32>.size)
+addr.mSelector = kAudioDevicePropertyBufferFrameSize
+addr.mScope = kAudioObjectPropertyScopeGlobal
+guard AudioObjectGetPropertyData(deviceID, &addr, 0, nil, &size, &bufferFrames) == noErr else {
+  fputs("ERR: buffer frame size\\n", stderr)
+  exit(1)
+}
+
+// Sample rate
+var sampleRate = Float64(0)
+size = UInt32(MemoryLayout<Float64>.size)
+addr.mSelector = kAudioDevicePropertyNominalSampleRate
+guard AudioObjectGetPropertyData(deviceID, &addr, 0, nil, &size, &sampleRate) == noErr else {
+  fputs("ERR: sample rate\\n", stderr)
+  exit(1)
+}
+
+// Stream latency — get first output stream
+addr.mSelector = kAudioDevicePropertyStreams
+addr.mScope = kAudioDevicePropertyScopeOutput
+var streamSize = UInt32(0)
+guard AudioObjectGetPropertyDataSize(deviceID, &addr, 0, nil, &streamSize) == noErr,
+      streamSize >= UInt32(MemoryLayout<AudioStreamID>.size) else {
+  // No streams — use 0 for stream latency
+  let totalFrames = Double(deviceLatency + safetyOffset + bufferFrames)
+  let latencyMs = (totalFrames / sampleRate) * 1000.0
+  print(String(format: "%.2f %.0f %u %u 0 %u", latencyMs, sampleRate, deviceLatency, safetyOffset, bufferFrames))
+  exit(0)
+}
+
+let streamCount = Int(streamSize) / MemoryLayout<AudioStreamID>.size
+var streamIDs = [AudioStreamID](repeating: 0, count: streamCount)
+guard AudioObjectGetPropertyData(deviceID, &addr, 0, nil, &streamSize, &streamIDs) == noErr else {
+  let totalFrames = Double(deviceLatency + safetyOffset + bufferFrames)
+  let latencyMs = (totalFrames / sampleRate) * 1000.0
+  print(String(format: "%.2f %.0f %u %u 0 %u", latencyMs, sampleRate, deviceLatency, safetyOffset, bufferFrames))
+  exit(0)
+}
+
+var streamLatency = UInt32(0)
+size = UInt32(MemoryLayout<UInt32>.size)
+var streamAddr = AudioObjectPropertyAddress(
+  mSelector: kAudioStreamPropertyLatency,
+  mScope: kAudioObjectPropertyScopeGlobal,
+  mElement: kAudioObjectPropertyElementMain
+)
+if AudioObjectGetPropertyData(streamIDs[0], &streamAddr, 0, nil, &size, &streamLatency) != noErr {
+  streamLatency = 0
+}
+
+let totalFrames = Double(deviceLatency + streamLatency + safetyOffset + bufferFrames)
+let latencyMs = (totalFrames / sampleRate) * 1000.0
+print(String(format: "%.2f %.0f %u %u %u %u", latencyMs, sampleRate, deviceLatency, safetyOffset, streamLatency, bufferFrames))
+`;
+
+    return new Promise((resolve) => {
+      execFile('swift', ['-e', swiftCode], { timeout: 5000 }, (err, stdout, stderr) => {
+        if (err || !stdout) {
+          if (this.diagLog && stderr) {
+            this.log(`[Bridge] CoreAudio swift error: ${stderr.trim()}`);
+          }
+          resolve(null);
+          return;
+        }
+
+        // Output format: "latencyMs sampleRate deviceLatency safetyOffset streamLatency bufferFrames"
+        const parts = stdout.trim().split(/\s+/);
+        if (parts.length < 6) { resolve(null); return; }
+
+        const latencyMs = parseFloat(parts[0]);
+        const sampleRate = parseFloat(parts[1]);
+        const deviceLat = parseInt(parts[2], 10);
+        const safetyOff = parseInt(parts[3], 10);
+        const streamLat = parseInt(parts[4], 10);
+        const bufFrames = parseInt(parts[5], 10);
+
+        if (isNaN(latencyMs) || latencyMs <= 0) { resolve(null); return; }
+
+        const method = `coreaudio(dev=${deviceLat}+stream=${streamLat}+safety=${safetyOff}+buf=${bufFrames}@${sampleRate}Hz)`;
+
+        if (this.diagLog) {
+          this.log(`[Bridge] CoreAudio detail: deviceLatency=${deviceLat} streamLatency=${streamLat} safetyOffset=${safetyOff} bufferFrames=${bufFrames} sampleRate=${sampleRate} → ${latencyMs.toFixed(2)}ms`);
+        }
+
+        resolve({ latencyMs, method });
+      });
+    });
   }
 
   /**
