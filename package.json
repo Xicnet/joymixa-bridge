@@ -15,7 +15,7 @@
     "make": "electron-forge make",
     "publish": "electron-forge publish",
     "lint": "eslint --ext .ts,.tsx .",
-    "rebuild": "electron-rebuild -f -w @ktamas77/abletonlink -w coreaudio-latency"
+    "rebuild": "electron-rebuild -f -w @ktamas77/abletonlink,coreaudio-latency"
   },
   "keywords": ["ableton-link", "music-sync", "webrtc", "electron", "midi"],
   "author": {
