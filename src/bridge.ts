@@ -6,6 +6,25 @@ import { readFile, readdir } from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 
+// CoreAudio native addon (macOS only) — returns null on other platforms
+interface CoreAudioResult {
+  latencyMs: number;
+  sampleRate: number;
+  deviceLatency: number;
+  streamLatency: number;
+  safetyOffset: number;
+  bufferFrames: number;
+}
+let coreaudioAddon: { getOutputLatency: () => CoreAudioResult | null } | null = null;
+if (process.platform === 'darwin') {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    coreaudioAddon = require('coreaudio-latency');
+  } catch (e) {
+    console.warn('[Bridge] CoreAudio native addon not available:', (e as Error).message);
+  }
+}
+
 export interface BridgeConfig {
   port: number;
   defaultBpm: number;
@@ -92,7 +111,7 @@ export class Bridge extends EventEmitter {
    * Platform strategies:
    * - Linux: Sample ALSA /proc/asound delay field (primary), hw_params ×2 (fallback),
    *   PipeWire quantum ×2 (last resort). See docs/research/linux-audio-pipeline-latency.md
-   * - macOS: CoreAudio property query via swift subprocess
+   * - macOS: CoreAudio NAPI addon — AudioObjectGetPropertyData for default output device
    *   (kAudioDevicePropertyLatency + kAudioStreamPropertyLatency
    *    + kAudioDevicePropertySafetyOffset + bufferFrameSize) / sampleRate
    * - Windows: not yet implemented
@@ -167,7 +186,7 @@ export class Bridge extends EventEmitter {
 
   private async measureAudioOutputLatencyMac(): Promise<void> {
     try {
-      const result = await this.measureViaCoreAudio();
+      const result = this.measureViaCoreAudio();
       if (result !== null) {
         this.measuredOutputLatency = result.latencyMs;
         this.latencyMethod = result.method;
@@ -182,7 +201,7 @@ export class Bridge extends EventEmitter {
       this.pin(msg);
     }
 
-    const msg = '[Bridge] Audio latency: macOS CoreAudio measurement failed — using fallback (none)';
+    const msg = '[Bridge] Audio latency: macOS CoreAudio measurement failed — native addon not available';
     this.log(msg);
     this.pin(msg);
     this.measuredOutputLatency = null;
@@ -190,144 +209,29 @@ export class Bridge extends EventEmitter {
   }
 
   /**
-   * Query macOS CoreAudio for default output device latency.
-   * Spawns a small Swift script that queries:
-   * - kAudioDevicePropertyLatency (device frames)
-   * - kAudioStreamPropertyLatency (stream frames)
+   * Query macOS CoreAudio for default output device latency via native NAPI addon.
+   * Queries:
+   * - kAudioDevicePropertyLatency (device pipeline frames)
+   * - kAudioStreamPropertyLatency (stream pipeline frames)
    * - kAudioDevicePropertySafetyOffset (safety frames)
    * - kAudioDevicePropertyBufferFrameSize (buffer frames)
    * - kAudioDevicePropertyNominalSampleRate
    * Total latency = (device + stream + safety + buffer) / sampleRate * 1000
    */
-  private measureViaCoreAudio(): Promise<{ latencyMs: number; method: string } | null> {
-    const swiftCode = `
-import CoreAudio
-import Foundation
+  private measureViaCoreAudio(): { latencyMs: number; method: string } | null {
+    if (!coreaudioAddon) return null;
 
-var defaultDeviceID = AudioObjectID(kAudioObjectSystemObject)
-var deviceID = AudioDeviceID(0)
-var size = UInt32(MemoryLayout<AudioDeviceID>.size)
+    const result = coreaudioAddon.getOutputLatency();
+    if (!result || result.latencyMs <= 0) return null;
 
-// Get default output device
-var addr = AudioObjectPropertyAddress(
-  mSelector: kAudioHardwarePropertyDefaultOutputDevice,
-  mScope: kAudioObjectPropertyScopeGlobal,
-  mElement: kAudioObjectPropertyElementMain
-)
-guard AudioObjectGetPropertyData(defaultDeviceID, &addr, 0, nil, &size, &deviceID) == noErr else {
-  fputs("ERR: no default output device\\n", stderr)
-  exit(1)
-}
+    const { latencyMs, sampleRate, deviceLatency, streamLatency, safetyOffset, bufferFrames } = result;
+    const method = `coreaudio(dev=${deviceLatency}+stream=${streamLatency}+safety=${safetyOffset}+buf=${bufferFrames}@${sampleRate}Hz)`;
 
-// Device latency (frames)
-var deviceLatency = UInt32(0)
-size = UInt32(MemoryLayout<UInt32>.size)
-addr.mSelector = kAudioDevicePropertyLatency
-addr.mScope = kAudioDevicePropertyScopeOutput
-guard AudioObjectGetPropertyData(deviceID, &addr, 0, nil, &size, &deviceLatency) == noErr else {
-  fputs("ERR: device latency\\n", stderr)
-  exit(1)
-}
+    if (this.diagLog) {
+      this.log(`[Bridge] CoreAudio detail: deviceLatency=${deviceLatency} streamLatency=${streamLatency} safetyOffset=${safetyOffset} bufferFrames=${bufferFrames} sampleRate=${sampleRate} → ${latencyMs.toFixed(2)}ms`);
+    }
 
-// Safety offset (frames)
-var safetyOffset = UInt32(0)
-size = UInt32(MemoryLayout<UInt32>.size)
-addr.mSelector = kAudioDevicePropertySafetyOffset
-guard AudioObjectGetPropertyData(deviceID, &addr, 0, nil, &size, &safetyOffset) == noErr else {
-  fputs("ERR: safety offset\\n", stderr)
-  exit(1)
-}
-
-// Buffer frame size
-var bufferFrames = UInt32(0)
-size = UInt32(MemoryLayout<UInt32>.size)
-addr.mSelector = kAudioDevicePropertyBufferFrameSize
-addr.mScope = kAudioObjectPropertyScopeGlobal
-guard AudioObjectGetPropertyData(deviceID, &addr, 0, nil, &size, &bufferFrames) == noErr else {
-  fputs("ERR: buffer frame size\\n", stderr)
-  exit(1)
-}
-
-// Sample rate
-var sampleRate = Float64(0)
-size = UInt32(MemoryLayout<Float64>.size)
-addr.mSelector = kAudioDevicePropertyNominalSampleRate
-guard AudioObjectGetPropertyData(deviceID, &addr, 0, nil, &size, &sampleRate) == noErr else {
-  fputs("ERR: sample rate\\n", stderr)
-  exit(1)
-}
-
-// Stream latency — get first output stream
-addr.mSelector = kAudioDevicePropertyStreams
-addr.mScope = kAudioDevicePropertyScopeOutput
-var streamSize = UInt32(0)
-guard AudioObjectGetPropertyDataSize(deviceID, &addr, 0, nil, &streamSize) == noErr,
-      streamSize >= UInt32(MemoryLayout<AudioStreamID>.size) else {
-  // No streams — use 0 for stream latency
-  let totalFrames = Double(deviceLatency + safetyOffset + bufferFrames)
-  let latencyMs = (totalFrames / sampleRate) * 1000.0
-  print(String(format: "%.2f %.0f %u %u 0 %u", latencyMs, sampleRate, deviceLatency, safetyOffset, bufferFrames))
-  exit(0)
-}
-
-let streamCount = Int(streamSize) / MemoryLayout<AudioStreamID>.size
-var streamIDs = [AudioStreamID](repeating: 0, count: streamCount)
-guard AudioObjectGetPropertyData(deviceID, &addr, 0, nil, &streamSize, &streamIDs) == noErr else {
-  let totalFrames = Double(deviceLatency + safetyOffset + bufferFrames)
-  let latencyMs = (totalFrames / sampleRate) * 1000.0
-  print(String(format: "%.2f %.0f %u %u 0 %u", latencyMs, sampleRate, deviceLatency, safetyOffset, bufferFrames))
-  exit(0)
-}
-
-var streamLatency = UInt32(0)
-size = UInt32(MemoryLayout<UInt32>.size)
-var streamAddr = AudioObjectPropertyAddress(
-  mSelector: kAudioStreamPropertyLatency,
-  mScope: kAudioObjectPropertyScopeGlobal,
-  mElement: kAudioObjectPropertyElementMain
-)
-if AudioObjectGetPropertyData(streamIDs[0], &streamAddr, 0, nil, &size, &streamLatency) != noErr {
-  streamLatency = 0
-}
-
-let totalFrames = Double(deviceLatency + streamLatency + safetyOffset + bufferFrames)
-let latencyMs = (totalFrames / sampleRate) * 1000.0
-print(String(format: "%.2f %.0f %u %u %u %u", latencyMs, sampleRate, deviceLatency, safetyOffset, streamLatency, bufferFrames))
-`;
-
-    return new Promise((resolve) => {
-      execFile('swift', ['-e', swiftCode], { timeout: 5000 }, (err, stdout, stderr) => {
-        if (err || !stdout) {
-          const detail = stderr?.trim() || err?.message || 'no output';
-          const msg = `[Bridge] CoreAudio swift failed: ${detail}`;
-          this.log(msg);
-          this.pin(msg);
-          resolve(null);
-          return;
-        }
-
-        // Output format: "latencyMs sampleRate deviceLatency safetyOffset streamLatency bufferFrames"
-        const parts = stdout.trim().split(/\s+/);
-        if (parts.length < 6) { resolve(null); return; }
-
-        const latencyMs = parseFloat(parts[0]);
-        const sampleRate = parseFloat(parts[1]);
-        const deviceLat = parseInt(parts[2], 10);
-        const safetyOff = parseInt(parts[3], 10);
-        const streamLat = parseInt(parts[4], 10);
-        const bufFrames = parseInt(parts[5], 10);
-
-        if (isNaN(latencyMs) || latencyMs <= 0) { resolve(null); return; }
-
-        const method = `coreaudio(dev=${deviceLat}+stream=${streamLat}+safety=${safetyOff}+buf=${bufFrames}@${sampleRate}Hz)`;
-
-        if (this.diagLog) {
-          this.log(`[Bridge] CoreAudio detail: deviceLatency=${deviceLat} streamLatency=${streamLat} safetyOffset=${safetyOff} bufferFrames=${bufFrames} sampleRate=${sampleRate} → ${latencyMs.toFixed(2)}ms`);
-        }
-
-        resolve({ latencyMs, method });
-      });
-    });
+    return { latencyMs, method };
   }
 
   /**
@@ -551,7 +455,6 @@ print(String(format: "%.2f %.0f %u %u %u %u", latencyMs, sampleRate, deviceLaten
     }
 
     // Measure native audio output latency BEFORE accepting clients.
-    // On macOS the Swift subprocess may take 1-3s to compile+run.
     try {
       await this.measureAudioOutputLatency();
     } catch (e) {

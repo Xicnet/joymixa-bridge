@@ -1,0 +1,13 @@
+{
+  "name": "coreaudio-latency",
+  "version": "1.0.0",
+  "private": true,
+  "description": "CoreAudio output latency query for macOS",
+  "main": "build/Release/coreaudio_latency.node",
+  "scripts": {
+    "install": "node-gyp rebuild"
+  },
+  "dependencies": {
+    "node-addon-api": "^7.0.0"
+  }
+}

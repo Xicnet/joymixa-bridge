@@ -17,5 +17,6 @@ export const mainConfig: Configuration = {
   // Electron's require() loads it directly from node_modules.
   externals: {
     '@ktamas77/abletonlink': 'commonjs2 @ktamas77/abletonlink',
+    'coreaudio-latency': 'commonjs2 coreaudio-latency',
   },
 };

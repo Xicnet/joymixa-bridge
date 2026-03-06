@@ -1,7 +1,7 @@
 {
   "name": "joymixa-bridge",
   "productName": "Joymixa Bridge",
-  "version": "1.5.3",
+  "version": "1.5.4",
   "description": "Ableton Link bridge and Joymixa-to-Joymixa relay for LAN music sync",
   "main": ".webpack/main",
   "repository": {
@@ -15,7 +15,7 @@
     "make": "electron-forge make",
     "publish": "electron-forge publish",
     "lint": "eslint --ext .ts,.tsx .",
-    "rebuild": "electron-rebuild -f -w @ktamas77/abletonlink"
+    "rebuild": "electron-rebuild -f -w @ktamas77/abletonlink -w coreaudio-latency"
   },
   "keywords": ["ableton-link", "music-sync", "webrtc", "electron", "midi"],
   "author": {
@@ -50,6 +50,7 @@
   },
   "dependencies": {
     "@ktamas77/abletonlink": "git+https://github.com/Xicnet/ableton-link.git",
+    "coreaudio-latency": "file:native/coreaudio-latency",
     "electron-squirrel-startup": "^1.0.1",
     "ws": "^8.19.0"
   }
