@@ -25,6 +25,25 @@ if (process.platform === 'darwin') {
   }
 }
 
+// WASAPI native addon (Windows only) — returns null on other platforms
+interface WasapiResult {
+  latencyMs: number;
+  sampleRate: number;
+  devicePeriod: number;       // ms
+  streamLatency: number;      // ms (0 in v1 — no Initialize call)
+  bufferMultiplier: number;   // currently 2.0
+  formFactor?: number;        // PKEY_AudioEndpoint_FormFactor enum value, optional
+}
+let wasapiAddon: { getOutputLatency: () => WasapiResult | null } | null = null;
+if (process.platform === 'win32') {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-var-requires
+    wasapiAddon = require('wasapi-latency');
+  } catch (e) {
+    console.warn('[Bridge] WASAPI native addon not available:', (e as Error).message);
+  }
+}
+
 export interface BridgeConfig {
   port: number;
   defaultBpm: number;
@@ -114,7 +133,8 @@ export class Bridge extends EventEmitter {
    * - macOS: CoreAudio NAPI addon — AudioObjectGetPropertyData for default output device
    *   (kAudioDevicePropertyLatency + kAudioStreamPropertyLatency
    *    + kAudioDevicePropertySafetyOffset + bufferFrameSize) / sampleRate
-   * - Windows: not yet implemented
+   * - Windows: WASAPI NAPI addon — IAudioClient::GetDevicePeriod ×2 on the default render
+   *   endpoint, with read-twice-take-max smoothing and floor/cap sanity guards.
    */
   private async measureAudioOutputLatency(): Promise<void> {
     const platform = process.platform;
@@ -123,6 +143,8 @@ export class Bridge extends EventEmitter {
       await this.measureAudioOutputLatencyLinux();
     } else if (platform === 'darwin') {
       await this.measureAudioOutputLatencyMac();
+    } else if (platform === 'win32') {
+      await this.measureAudioOutputLatencyWindows();
     } else {
       this.measuredOutputLatency = null;
       this.latencyMethod = null;
@@ -229,6 +251,101 @@ export class Bridge extends EventEmitter {
 
     if (this.diagLog) {
       this.log(`[Bridge] CoreAudio detail: deviceLatency=${deviceLatency} streamLatency=${streamLatency} safetyOffset=${safetyOffset} bufferFrames=${bufferFrames} sampleRate=${sampleRate} → ${latencyMs.toFixed(2)}ms`);
+    }
+
+    return { latencyMs, method };
+  }
+
+  private async measureAudioOutputLatencyWindows(): Promise<void> {
+    try {
+      const result = await this.measureViaWasapi();
+      if (result !== null) {
+        this.measuredOutputLatency = result.latencyMs;
+        this.latencyMethod = result.method;
+        const msg = `[Bridge] Audio latency: platform=win32 measuredOutputLatency=${result.latencyMs.toFixed(1)}ms method=${result.method}`;
+        this.log(msg);
+        this.pin(msg);
+        return;
+      }
+    } catch (e) {
+      const msg = `[Bridge] Audio latency: Windows WASAPI exception: ${e}`;
+      this.log(msg);
+      this.pin(msg);
+    }
+
+    const msg = '[Bridge] Audio latency: Windows WASAPI measurement failed — native addon not available';
+    this.log(msg);
+    this.pin(msg);
+    this.measuredOutputLatency = null;
+    this.latencyMethod = null;
+  }
+
+  /**
+   * Query WASAPI default render endpoint for shared-mode device period via NAPI addon.
+   *
+   * Formula: latencyMs = devicePeriod × bufferMultiplier (typically × 2). The × 2
+   * mirrors Linux's PipeWire double-buffer rationale — one period being filled,
+   * one being consumed — so real pipeline latency ≥ 2× the scheduling period.
+   *
+   * Smoothing: read twice with ~50ms gap, take max. Win32 device period is far
+   * more stable than PipeWire delay so 2 samples is enough; we just want to
+   * detect the rare oscillation case (device reconfigured by mixer between calls).
+   *
+   * Sanity guards:
+   *   - Floor: 20ms (shared-mode floor; absorbs misreporting drivers)
+   *   - Cap (non-BT): 80ms
+   *   - Cap (BT hint): 400ms (BT codec adds 40-300ms invisible to API)
+   */
+  private async measureViaWasapi(): Promise<{ latencyMs: number; method: string } | null> {
+    if (!wasapiAddon) return null;
+
+    // Read twice with ~50ms gap, take max. r2 may legitimately fail (transient COM
+    // error); tolerate by using r1 alone.
+    const r1 = wasapiAddon.getOutputLatency();
+    if (!r1 || r1.latencyMs <= 0) return null;
+    await new Promise(resolve => setTimeout(resolve, 50));
+    const r2 = wasapiAddon.getOutputLatency();
+
+    const samples: WasapiResult[] = [];
+    if (r1 && r1.latencyMs > 0) samples.push(r1);
+    if (r2 && r2.latencyMs > 0) samples.push(r2);
+    if (samples.length === 0) return null;
+
+    const maxSample = samples.reduce((a, b) => (a.latencyMs >= b.latencyMs ? a : b));
+    const minSample = samples.reduce((a, b) => (a.latencyMs <= b.latencyMs ? a : b));
+    const drift = (maxSample.latencyMs - minSample.latencyMs) / maxSample.latencyMs;
+    if (samples.length === 2 && drift > 0.05) {
+      this.log(`[Bridge] WASAPI sample drift: ${minSample.latencyMs.toFixed(1)}ms vs ${maxSample.latencyMs.toFixed(1)}ms (${(drift * 100).toFixed(0)}%)`);
+    }
+
+    // Bluetooth detection — PKEY_AudioEndpoint_FormFactor enum (see mmdeviceapi.h).
+    // Permissive heuristic: any headphone/headset-like form factor → assume BT-possible
+    // and raise the cap. Wired headphones share the same form factor as Bluetooth, so
+    // they'd also get the BT cap — but the cap only kicks in on already-large values,
+    // so it doesn't hurt accuracy on wired output.
+    const formFactor = maxSample.formFactor;
+    const isBluetoothHint = formFactor !== undefined && [4, 5, 6, 8].includes(formFactor);
+
+    let latencyMs = maxSample.latencyMs;
+    const FLOOR_MS = 20;
+    const CAP_NON_BT_MS = 80;
+    const CAP_BT_MS = 400;
+    const cap = isBluetoothHint ? CAP_BT_MS : CAP_NON_BT_MS;
+
+    if (latencyMs < FLOOR_MS) {
+      this.log(`[Bridge] WASAPI latency ${latencyMs.toFixed(1)}ms below floor — clamping to ${FLOOR_MS}ms`);
+      latencyMs = FLOOR_MS;
+    }
+    if (latencyMs > cap) {
+      this.log(`[Bridge] WASAPI latency ${latencyMs.toFixed(1)}ms above cap (${cap}ms, isBluetoothHint=${isBluetoothHint}) — clamping`);
+      latencyMs = cap;
+    }
+
+    const { devicePeriod, sampleRate, bufferMultiplier } = maxSample;
+    const method = `wasapi(period=${devicePeriod.toFixed(2)}ms×${bufferMultiplier}@${sampleRate}Hz${isBluetoothHint ? ',btHint' : ''})`;
+
+    if (this.diagLog) {
+      this.log(`[Bridge] WASAPI detail: devicePeriod=${devicePeriod.toFixed(2)}ms bufferMultiplier=${bufferMultiplier} sampleRate=${sampleRate} formFactor=${formFactor ?? 'n/a'} isBluetoothHint=${isBluetoothHint} → ${latencyMs.toFixed(2)}ms`);
     }
 
     return { latencyMs, method };
