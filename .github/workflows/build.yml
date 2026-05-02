@@ -39,7 +39,8 @@ jobs:
         run: yarn rebuild
 
       - name: Build distributables
-        run: yarn make --targets ${{ matrix.targets }}
+        shell: bash
+        run: npx electron-forge make --targets "${{ matrix.targets }}"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
