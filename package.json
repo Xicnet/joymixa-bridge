@@ -15,7 +15,7 @@
     "make": "electron-forge make",
     "publish": "electron-forge publish",
     "lint": "eslint --ext .ts,.tsx .",
-    "rebuild": "electron-rebuild -f -w @ktamas77/abletonlink,coreaudio-latency"
+    "rebuild": "electron-rebuild -f -w @ktamas77/abletonlink,coreaudio-latency,wasapi-latency"
   },
   "keywords": ["ableton-link", "music-sync", "webrtc", "electron", "midi"],
   "author": {
@@ -51,6 +51,7 @@
   "dependencies": {
     "@ktamas77/abletonlink": "git+https://github.com/Xicnet/ableton-link.git",
     "coreaudio-latency": "file:native/coreaudio-latency",
+    "wasapi-latency": "file:native/wasapi-latency",
     "electron-squirrel-startup": "^1.0.1",
     "ws": "^8.19.0"
   }

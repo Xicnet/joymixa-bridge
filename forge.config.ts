@@ -15,7 +15,7 @@ import { rendererConfig } from './webpack.renderer.config';
 import { preloadConfig } from './webpack.preload.config';
 
 // Native modules that webpack externalizes — must be copied into the package
-const NATIVE_MODULES = ['@ktamas77/abletonlink', 'coreaudio-latency', 'bindings', 'file-uri-to-path', 'node-addon-api'];
+const NATIVE_MODULES = ['@ktamas77/abletonlink', 'coreaudio-latency', 'wasapi-latency', 'bindings', 'file-uri-to-path', 'node-addon-api'];
 
 function copyNativeModules(buildPath: string): void {
   const srcNodeModules = path.resolve(__dirname, 'node_modules');
@@ -33,7 +33,7 @@ function copyNativeModules(buildPath: string): void {
 const config: ForgeConfig = {
   packagerConfig: {
     asar: {
-      unpack: '**/node_modules/{@ktamas77/abletonlink,coreaudio-latency,bindings,file-uri-to-path,node-addon-api}/**',
+      unpack: '**/node_modules/{@ktamas77/abletonlink,coreaudio-latency,wasapi-latency,bindings,file-uri-to-path,node-addon-api}/**',
     },
     name: 'Joymixa Bridge',
     executableName: 'joymixa-bridge',
