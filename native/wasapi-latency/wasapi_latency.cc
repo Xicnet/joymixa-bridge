@@ -23,6 +23,12 @@
 #include <napi.h>
 
 #ifdef _WIN32
+// INITGUID must be defined exactly once before including headers that declare
+// PROPERTYKEY constants. Without it, PKEY_AudioEndpoint_FormFactor is declared
+// (extern) but the GUID definition is never emitted, producing LNK2001 at link
+// time. The conventional alternative is to link mmdevapi.lib / wmcodecdspuuid.lib;
+// INITGUID keeps the dependency surface contained to the header set already in use.
+#define INITGUID
 #include <windows.h>
 #include <mmdeviceapi.h>
 #include <audioclient.h>
