@@ -11,7 +11,7 @@ jobs:
     # Only bridge-only variant in CI.
     # Bundle variant requires proprietary game assets — build locally only.
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Build
         working-directory: ios
@@ -33,7 +33,7 @@ jobs:
           cd build && zip -r LinkBridge-bridgeOnly-unsigned.ipa Payload
           rm -rf Payload
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: LinkBridge-bridgeOnly-unsigned.ipa
           path: ios/build/LinkBridge-bridgeOnly-unsigned.ipa
