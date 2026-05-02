@@ -146,8 +146,33 @@ Default values in `bridge.ts`:
 - Set "Open at Login" from the tray menu context
 
 ### Windows
-- Uses Squirrel installer via `electron-forge`
-- Untested
+
+**Audio sync requires Apple's Bonjour service** for Ableton Link peer discovery (mDNS/DNS-SD).
+Windows does not ship Bonjour by default. Install via one of:
+
+- **iTunes** (already includes Bonjour) — most users have it.
+- **Bonjour Print Services for Windows** — standalone installer from Apple's support site.
+
+Without Bonjour, the bridge runs fine but won't see other Link peers on the LAN.
+
+**First-run SmartScreen prompt:** Windows builds are currently **unsigned** (code
+signing track is separate). On first launch, Windows SmartScreen will show
+"Windows protected your PC". Click **More info → Run anyway**. Signed builds are on
+the roadmap.
+
+**Verifying audio latency measurement:** open the bridge tray icon → "Copy Logs". Look
+for a line like:
+
+```
+[Bridge] Audio latency: platform=win32 measuredOutputLatency=21.3ms method=wasapi(period=10.00ms×2@48000Hz)
+```
+
+A healthy value is typically 20-40ms on internal speakers / wired output, 100-300ms on
+Bluetooth. If you see `measurement failed` or values outside those ranges, file an
+issue with the full log.
+
+**Tray-only app:** like macOS, the Windows build runs in the system tray with no
+visible window by default. Click the tray icon to open the status popup.
 
 ## Troubleshooting
 
@@ -156,6 +181,12 @@ Default values in `bridge.ts`:
 - Check that UDP multicast is not blocked by firewall
 - On Linux, verify Avahi is running: `systemctl status avahi-daemon`
 
+**Windows: no peers found, but Ableton Live is running on the same LAN:**
+- Check that Bonjour service is running: open Services.msc, find "Bonjour Service",
+  start it if stopped.
+- Check Windows Firewall isn't blocking UDP multicast on port 5353 (mDNS).
+- Some corporate networks disable mDNS at the switch level — Link won't work there.
+
 **Browser can't connect via WebSocket:**
 - The bridge listens on `0.0.0.0:20809` -- ensure the port isn't blocked
 - `ws://` from an HTTPS page is blocked by browsers for non-localhost addresses. Connect over HTTP, or use `ws://localhost:20809` from the same machine
@@ -163,6 +194,15 @@ Default values in `bridge.ts`:
 **Native addon build fails:**
 - Ensure `build-essential`, `python3`, and `node-gyp` are installed
 - After `yarn install`, always run `yarn rebuild` to recompile for Electron
+
+**Native addon build fails on Windows:**
+- `windows-latest` GitHub Actions runners have everything pre-installed, but local
+  builds need: Node 20+, Python 3, and Visual Studio Build Tools 2019 or later
+  (with the "Desktop development with C++" workload).
+- After Electron updates, run `yarn rebuild` to recompile against the new ABI.
+- If `wasapi-latency` specifically fails, you're missing the Windows SDK headers
+  (`mmdeviceapi.h`, `audioclient.h`). Reinstall Visual Studio Build Tools with the
+  Windows 10/11 SDK component checked.
 
 ## Releasing
 

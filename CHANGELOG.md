@@ -1,5 +1,13 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- Windows desktop builds via GitHub Actions `windows-latest` (Squirrel installer).
+- WASAPI native audio output latency measurement via NAPI addon
+  (`native/wasapi-latency/`), enabling Tier 1 sync compensation on Windows.
+- README guide: Bonjour install, SmartScreen workflow, log inspection.
+
 ## 1.0.0
 
 Initial release.
