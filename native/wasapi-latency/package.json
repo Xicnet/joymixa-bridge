@@ -1,0 +1,13 @@
+{
+  "name": "wasapi-latency",
+  "version": "1.0.0",
+  "private": true,
+  "description": "WASAPI default render endpoint latency query for Windows",
+  "main": "build/Release/wasapi_latency.node",
+  "scripts": {
+    "install": "node-gyp rebuild"
+  },
+  "dependencies": {
+    "node-addon-api": "^7.0.0"
+  }
+}
