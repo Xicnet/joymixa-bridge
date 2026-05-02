@@ -61,6 +61,7 @@ stream opened, single-number ms result, `null` on failure (never throw).
 ## Docs
 
 - `docs/desktop.md` — Desktop build, architecture, dependencies, Linux sandbox fix
+- `docs/windows-build.md` — Windows build via GH Actions, decisions log, calibration follow-ups
 - `docs/android.md` — Android build, architecture, build variants
 - `docs/ios.md` — iOS build, architecture, build variants
 - `docs/game-bundle.md` — Game bundling: asset copy script, WebView overview

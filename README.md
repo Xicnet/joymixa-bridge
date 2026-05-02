@@ -174,6 +174,10 @@ issue with the full log.
 **Tray-only app:** like macOS, the Windows build runs in the system tray with no
 visible window by default. Click the tray icon to open the status popup.
 
+**Build details:** see [docs/windows-build.md](docs/windows-build.md) for how to
+trigger a CI build manually (Actions tab → workflow_dispatch), download artifacts,
+and the architecture decisions behind the WASAPI latency measurement.
+
 ## Troubleshooting
 
 **Bridge starts but no Link peers found:**

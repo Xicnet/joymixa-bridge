@@ -55,7 +55,7 @@ const config: ForgeConfig = {
     new MakerSquirrel({
       name: 'joymixa-bridge',
     }),
-    new MakerZIP({}, ['darwin']),
+    new MakerZIP({}, ['darwin', 'win32']),
     new MakerDeb({
       options: {
         name: 'joymixa-bridge',
