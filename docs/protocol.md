@@ -128,6 +128,10 @@ When triggered by a Link peer callback, `tempo` is rounded to 2 decimal places.
 When triggered by a client `set-tempo` command, `tempo` is the raw value read
 back from Link after setting (Link may quantize it).
 
+> **Note:** The `beat` and `phase` fields in `tempo` messages are captured
+> at callback delivery time, not at the exact moment Link changed tempo.
+> For precise timing, use the periodic `state` messages.
+
 ### 3.4 `playing` — transport state change
 
 Broadcast when Link start/stop state changes.

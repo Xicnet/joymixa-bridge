@@ -584,6 +584,9 @@ export class Bridge extends EventEmitter {
     // Link callbacks
     this.link.setTempoCallback((rawTempo: number) => {
       const tempo = Math.round(rawTempo * 100) / 100;
+      // beat/phase are approximate — TSFN scheduling delay means getState()
+      // captures "now" (callback execution time), not the moment Link changed
+      // tempo. Frontend uses periodic state messages for timing, not this event.
       const { beat, phase } = this.link!.getState(this.config.quantum);
       this.log(`[bridge] tempo from Link: ${tempo}`);
       this.broadcast({ type: 'tempo', tempo, beat, phase, quantum: this.config.quantum });
@@ -742,6 +745,13 @@ export class Bridge extends EventEmitter {
     if (remainingBeats < 0) this.warn(`[Bridge] remainingBeats < 0: ${remainingBeats}`);
     if (remainingBeats > quantum) this.warn(`[Bridge] remainingBeats > quantum: ${remainingBeats} > ${quantum}`);
     if (nextBar0Delay > quantum * msPerBeat) this.warn(`[Bridge] nextBar0Delay exceeds bar: ${nextBar0Delay.toFixed(1)} > ${(quantum * msPerBeat).toFixed(1)}`);
+
+    if (beat >= 0) {
+      const expectedPhase = beat % quantum;
+      if (Math.abs(expectedPhase - phase) > 0.001) {
+        this.warn(`[Bridge] phase coherence check failed: beat=${beat.toFixed(6)} phase=${phase.toFixed(6)} expected=${expectedPhase.toFixed(6)}`);
+      }
+    }
 
     return {
       tempo: Math.round(tempo * 100) / 100,
