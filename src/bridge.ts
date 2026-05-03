@@ -584,8 +584,7 @@ export class Bridge extends EventEmitter {
     // Link callbacks
     this.link.setTempoCallback((rawTempo: number) => {
       const tempo = Math.round(rawTempo * 100) / 100;
-      const beat = this.link!.getBeat();
-      const phase = this.link!.getPhase(this.config.quantum);
+      const { beat, phase } = this.link!.getState(this.config.quantum);
       this.log(`[bridge] tempo from Link: ${tempo}`);
       this.broadcast({ type: 'tempo', tempo, beat, phase, quantum: this.config.quantum });
       this.emit('tempo', tempo);
@@ -729,13 +728,8 @@ export class Bridge extends EventEmitter {
         nextBar0Delay: 0,
       };
     }
-    // Read all values once — each getter calls captureAppSessionState()
-    // internally, so we minimise the number of calls and use the same
-    // phase/tempo for both the state message and nextBar0Delay.
-    const beat = this.link.getBeat();
     const quantum = this.config.quantum;
-    const phase = this.link.getPhase(quantum);
-    const tempo = this.link.getTempo();
+    const { beat, phase, tempo, isPlaying } = this.link.getState(quantum);
     const remainingBeats = quantum - phase;
     const msPerBeat = 60000 / tempo;
     const nextBar0Delay = remainingBeats * msPerBeat;
@@ -751,7 +745,7 @@ export class Bridge extends EventEmitter {
 
     return {
       tempo: Math.round(tempo * 100) / 100,
-      isPlaying: this.link.isPlaying(),
+      isPlaying,
       beat,
       phase,
       quantum,
@@ -778,9 +772,7 @@ export class Bridge extends EventEmitter {
     if (msg.type === 'set-tempo' && typeof msg.tempo === 'number' && isFinite(msg.tempo) && msg.tempo > 0) {
       this.log(`[Bridge:cmd] set-tempo tempo=${msg.tempo.toFixed(2)}`);
       this.link.setTempo(msg.tempo);
-      const tempo = this.link.getTempo();
-      const beat = this.link.getBeat();
-      const phase = this.link.getPhase(this.config.quantum);
+      const { tempo, beat, phase } = this.link.getState(this.config.quantum);
       this.broadcast({ type: 'tempo', tempo, beat, phase, quantum: this.config.quantum });
     }
 
