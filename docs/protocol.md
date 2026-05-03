@@ -61,6 +61,8 @@ Sent immediately when a client connects. Contains a full state snapshot.
   "numClients": 2,
   "nextBar0Delay": 345.67,
   "measuredOutputLatency": 21.3,
+  "latencyMethod": "alsa-delay(max=2048/48000@card0/pcm0p/sub0)",
+  "latencyDiagnostics": "alsa-delay: device=card0/pcm0p/sub0 rate=48000 samples=20 min=1024(21.3ms) max=2048(42.7ms)",
   "jmxBeat": 2.5
 }
 ```
@@ -76,6 +78,8 @@ Sent immediately when a client connects. Contains a full state snapshot.
 | `numClients`   | int     | Number of connected WebSocket clients (including this one)|
 | `nextBar0Delay`| float   | Milliseconds until the next bar boundary (beat 0 of bar) |
 | `measuredOutputLatency` | float? | Optional. Native OS audio output latency in milliseconds, measured by the bridge. See §5.2. Omitted if measurement is unavailable (unsupported platform, measurement failed). |
+| `latencyMethod` | string | Compact description of the measurement method used, e.g. `alsa-delay(max=2048/48000@card0/pcm0p/sub0)`. Set to `"none"` when measurement is unavailable. |
+| `latencyDiagnostics` | string? | Optional. Detailed diagnostic string for the latency measurement. Present only when `measuredOutputLatency` is present. Intended for remote debugging — clients may log it but should not parse it. |
 | `jmxBeat`      | float?  | Optional. Application-level loop beat from first active client that reported one (see `loop-beat` command) |
 
 `numClients` includes the newly connected client.
@@ -98,6 +102,8 @@ Sent to all clients at `stateHz` frequency (default: every 50ms).
   "numClients": 3,
   "nextBar0Delay": 345.67,
   "measuredOutputLatency": 21.3,
+  "latencyMethod": "alsa-delay(max=2048/48000@card0/pcm0p/sub0)",
+  "latencyDiagnostics": "alsa-delay: device=card0/pcm0p/sub0 rate=48000 samples=20 min=1024(21.3ms) max=2048(42.7ms)",
   "jmxBeat": 2.5,
   "ts": 1708531200000
 }
@@ -215,11 +221,19 @@ the start-playing time, then starts transport.
 
 ### 4.5 `force-beat-at-time`
 
-Force a specific beat value at a specific time. Used for manual phase correction.
+Force a specific beat value at a specific time. This is the bridge's exposure of
+Link's `forceBeatAtTime` method, intended for bridging an external clock source
+into a Link session.
 
 ```json
 { "type": "force-beat-at-time", "beat": 0, "time": 1708531200000, "quantum": 4 }
 ```
+
+> **Warning:** The official Ableton Link SDK designates `forceBeatAtTime` as
+> dangerous. It unconditionally remaps the beat/time relationship for **all**
+> peers in the session, causing beat discontinuities. Use only for bridging
+> an external clock source into a Link session. Normal quantized launch
+> should use `request-quantized-start` instead.
 
 **Validation:** All three fields (`beat`, `time`, `quantum`) must be numbers.
 Message is silently ignored if any field is missing or non-numeric.
@@ -278,15 +292,17 @@ Present in `hello` and `state` messages when the bridge can measure it; omitted
 otherwise. The client uses this instead of the browser's unreliable
 `AudioContext.outputLatency` for Link phase-alignment compensation.
 
-**Linux/PipeWire:** PipeWire clock quantum ÷ sample rate × 1000 (e.g. 1024/48000 = 21.3ms).
-Queried via `pw-metadata -n settings`. Falls back to ALSA `period_size` from
-`/proc/asound/card*/pcm*p/sub*/hw_params`.
+**Linux:** Primary: samples ALSA delay field from `/proc/asound/` for RUNNING
+streams (max-of-20 over 200ms). Fallback: ALSA `period_size × 2` from `hw_params`.
+Last resort: PipeWire clock quantum × 2 via `pw-metadata`.
 
-**macOS:** CoreAudio property query via `swift` subprocess. Sums
-`kAudioDevicePropertyLatency + kAudioStreamPropertyLatency +
-kAudioDevicePropertySafetyOffset + bufferFrameSize` in frames, divided by sample rate.
+**macOS:** CoreAudio NAPI addon. Sums `kAudioDevicePropertyLatency +
+kAudioStreamPropertyLatency + kAudioDevicePropertySafetyOffset + bufferFrameSize`
+in frames, divided by sample rate.
 
-**Windows:** Not yet implemented — field is omitted.
+**Windows:** WASAPI NAPI addon. Reads `GetDevicePeriod` × buffer multiplier (2×)
+on the default render endpoint, with read-twice-take-max smoothing and
+floor/cap sanity guards (20ms floor, 80ms cap, 400ms for Bluetooth hints).
 
 Refreshed every 30 seconds to track dynamic buffer resizing.
 

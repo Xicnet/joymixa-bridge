@@ -83,6 +83,7 @@ export class Bridge extends EventEmitter {
   // Native audio output latency measurement (ms)
   private measuredOutputLatency: number | null = null;
   private latencyMethod: string | null = null;
+  private latencyDiagnostics: string | null = null;
   private latencyRefreshInterval: ReturnType<typeof setInterval> | null = null;
   private readonly LATENCY_REFRESH_MS = 30_000;
 
@@ -148,6 +149,7 @@ export class Bridge extends EventEmitter {
     } else {
       this.measuredOutputLatency = null;
       this.latencyMethod = null;
+      this.latencyDiagnostics = null;
     }
   }
 
@@ -191,6 +193,7 @@ export class Bridge extends EventEmitter {
       if (pw !== null) {
         this.measuredOutputLatency = pw.latencyMs;
         this.latencyMethod = pw.method;
+        this.latencyDiagnostics = `pw-quantum: ${pw.method}`;
         const msg = `[Bridge] Audio latency: platform=linux measuredOutputLatency=${pw.latencyMs.toFixed(1)}ms method=${pw.method} (fallback: no ALSA data)`;
         this.log(msg);
         this.pin(msg);
@@ -204,6 +207,7 @@ export class Bridge extends EventEmitter {
     this.pin(msg);
     this.measuredOutputLatency = null;
     this.latencyMethod = null;
+    this.latencyDiagnostics = null;
   }
 
   private async measureAudioOutputLatencyMac(): Promise<void> {
@@ -212,6 +216,7 @@ export class Bridge extends EventEmitter {
       if (result !== null) {
         this.measuredOutputLatency = result.latencyMs;
         this.latencyMethod = result.method;
+        this.latencyDiagnostics = result.method;
         const msg = `[Bridge] Audio latency: platform=darwin measuredOutputLatency=${result.latencyMs.toFixed(1)}ms method=${result.method}`;
         this.log(msg);
         this.pin(msg);
@@ -228,6 +233,7 @@ export class Bridge extends EventEmitter {
     this.pin(msg);
     this.measuredOutputLatency = null;
     this.latencyMethod = null;
+    this.latencyDiagnostics = null;
   }
 
   /**
@@ -262,6 +268,7 @@ export class Bridge extends EventEmitter {
       if (result !== null) {
         this.measuredOutputLatency = result.latencyMs;
         this.latencyMethod = result.method;
+        this.latencyDiagnostics = result.method;
         const msg = `[Bridge] Audio latency: platform=win32 measuredOutputLatency=${result.latencyMs.toFixed(1)}ms method=${result.method}`;
         this.log(msg);
         this.pin(msg);
@@ -278,6 +285,7 @@ export class Bridge extends EventEmitter {
     this.pin(msg);
     this.measuredOutputLatency = null;
     this.latencyMethod = null;
+    this.latencyDiagnostics = null;
   }
 
   /**
@@ -510,6 +518,8 @@ export class Bridge extends EventEmitter {
       this.log(`[Bridge] ALSA delay sampling: device=${deviceId} rate=${rate} samples=${delays.length} min=${minDelay}(${minMs.toFixed(1)}ms) max=${maxDelay}(${latencyMs.toFixed(1)}ms) mean=${(mean / rate * 1000).toFixed(1)}ms`);
     }
 
+    this.latencyDiagnostics = `alsa-delay: device=${deviceId} rate=${rate} samples=${delays.length} min=${minDelay}(${minMs.toFixed(1)}ms) max=${maxDelay}(${latencyMs.toFixed(1)}ms)`;
+
     return { latencyMs, method: `alsa-delay(max=${maxDelay}/${rate}@${deviceId})` };
   }
 
@@ -544,6 +554,8 @@ export class Bridge extends EventEmitter {
             if (this.diagLog) {
               this.log(`[Bridge] ALSA hw_params: device=${deviceId} period=${periodSize} buffer=${bufferSize} rate=${rate} → ${latencyMs.toFixed(1)}ms (period×2)`);
             }
+
+            this.latencyDiagnostics = `alsa-hwparams: device=${deviceId} period=${periodSize} buffer=${bufferSize} rate=${rate}`;
 
             return { latencyMs, method: `alsa-hwparams(${periodSize}×2/${rate}@${deviceId})` };
           }
@@ -623,7 +635,11 @@ export class Bridge extends EventEmitter {
         numClients: this.clients.size,
         ...(jmxBeat !== undefined && { jmxBeat }),
         ...(this.measuredOutputLatency !== null
-          ? { measuredOutputLatency: this.measuredOutputLatency, latencyMethod: this.latencyMethod }
+          ? {
+              measuredOutputLatency: this.measuredOutputLatency,
+              latencyMethod: this.latencyMethod,
+              latencyDiagnostics: this.latencyDiagnostics,
+            }
           : { latencyMethod: 'none' }),
       };
 
@@ -665,7 +681,11 @@ export class Bridge extends EventEmitter {
         numClients: this.clients.size,
         ...(jmxBeat !== undefined && { jmxBeat }),
         ...(this.measuredOutputLatency !== null
-          ? { measuredOutputLatency: this.measuredOutputLatency, latencyMethod: this.latencyMethod }
+          ? {
+              measuredOutputLatency: this.measuredOutputLatency,
+              latencyMethod: this.latencyMethod,
+              latencyDiagnostics: this.latencyDiagnostics,
+            }
           : { latencyMethod: 'none' }),
         ts,
       });
