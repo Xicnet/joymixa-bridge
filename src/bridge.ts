@@ -757,9 +757,6 @@ export class Bridge extends EventEmitter {
     const msPerBeat = 60000 / tempo;
     const nextBar0Delay = remainingBeats * msPerBeat;
 
-    if (this.diagLog) {
-      this.log(`[Bridge:state] beat=${beat.toFixed(3)} phase=${phase.toFixed(3)}/${quantum} tempo=${tempo.toFixed(2)} remainingBeats=${remainingBeats.toFixed(3)} msPerBeat=${msPerBeat.toFixed(1)} nextBar0Delay=${nextBar0Delay.toFixed(1)}ms`);
-    }
 
     // Range validation — always on (indicates bugs, not diagnostics)
     if (remainingBeats < 0) this.warn(`[Bridge] remainingBeats < 0: ${remainingBeats}`);
@@ -818,7 +815,7 @@ export class Bridge extends EventEmitter {
 
     if (msg.type === 'request-quantized-start') {
       const quantum = typeof msg.quantum === 'number' ? msg.quantum : this.config.quantum;
-      const time = this.link.getCurrentTime();
+      const time = this.link.getTimeForBeat(this.link.getBeat(), quantum);
       this.log(`[Bridge:cmd] request-quantized-start quantum=${quantum}`);
       this.link.setIsPlayingAndRequestBeatAtTime(true, time, 0, quantum);
     }
