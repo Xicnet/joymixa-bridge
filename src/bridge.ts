@@ -66,7 +66,7 @@ const DEFAULT_CONFIG: BridgeConfig = {
   port: 20809,
   defaultBpm: 120,
   quantum: 4,
-  stateHz: 20,
+  stateHz: 100,
 };
 
 export class Bridge extends EventEmitter {
@@ -595,7 +595,7 @@ export class Bridge extends EventEmitter {
 
     // Link callbacks
     this.link.setTempoCallback((rawTempo: number) => {
-      const tempo = Math.round(rawTempo * 100) / 100;
+      const tempo = rawTempo;
       // beat/phase are approximate — TSFN scheduling delay means getState()
       // captures "now" (callback execution time), not the moment Link changed
       // tempo. Frontend uses periodic state messages for timing, not this event.
@@ -774,7 +774,7 @@ export class Bridge extends EventEmitter {
     }
 
     return {
-      tempo: Math.round(tempo * 100) / 100,
+      tempo,
       isPlaying,
       beat,
       phase,
@@ -803,7 +803,7 @@ export class Bridge extends EventEmitter {
       this.log(`[Bridge:cmd] set-tempo tempo=${msg.tempo.toFixed(2)}`);
       this.link.setTempo(msg.tempo);
       const { tempo, beat, phase } = this.link.getState(this.config.quantum);
-      this.broadcast({ type: 'tempo', tempo, beat, phase, quantum: this.config.quantum });
+      this.broadcastExcept(sender, { type: 'tempo', tempo, beat, phase, quantum: this.config.quantum });
     }
 
     if (msg.type === 'play') {
@@ -818,9 +818,9 @@ export class Bridge extends EventEmitter {
 
     if (msg.type === 'request-quantized-start') {
       const quantum = typeof msg.quantum === 'number' ? msg.quantum : this.config.quantum;
+      const time = this.link.getCurrentTime();
       this.log(`[Bridge:cmd] request-quantized-start quantum=${quantum}`);
-      this.link.requestBeatAtStartPlayingTime(0, quantum);
-      this.link.setIsPlaying(true);
+      this.link.setIsPlayingAndRequestBeatAtTime(true, time, 0, quantum);
     }
 
     if (msg.type === 'force-beat-at-time') {
