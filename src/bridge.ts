@@ -5,6 +5,7 @@ import { execFile } from 'child_process';
 import { readFile, readdir } from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
+import { createWriteStream, WriteStream } from 'fs';
 
 // CoreAudio native addon (macOS only) — returns null on other platforms
 interface CoreAudioResult {
@@ -92,10 +93,15 @@ export class Bridge extends EventEmitter {
   private readonly LOG_BUFFER_MAX = 2000;
   // Pinned lines survive ring buffer eviction (platform info, latency result)
   private pinnedLines: string[] = [];
+  // File log (dev only)
+  private fileLog: WriteStream | null = null;
 
   constructor(config?: Partial<BridgeConfig>) {
     super();
     this.config = { ...DEFAULT_CONFIG, ...config };
+    if (process.env.NODE_ENV !== 'production') {
+      this.fileLog = createWriteStream('/tmp/joymixa-bridge.log', { flags: 'a' });
+    }
   }
 
   private log(msg: string): void {
@@ -103,6 +109,7 @@ export class Bridge extends EventEmitter {
     console.log(msg);
     this.logBuffer.push(line);
     if (this.logBuffer.length > this.LOG_BUFFER_MAX) this.logBuffer.shift();
+    this.fileLog?.write(line + '\n');
   }
 
   private warn(msg: string): void {
@@ -110,6 +117,7 @@ export class Bridge extends EventEmitter {
     console.warn(msg);
     this.logBuffer.push(line);
     if (this.logBuffer.length > this.LOG_BUFFER_MAX) this.logBuffer.shift();
+    this.fileLog?.write(line + '\n');
   }
 
   public getLogs(): string {
@@ -724,6 +732,7 @@ export class Bridge extends EventEmitter {
     }
 
     this.log('[bridge] stopped');
+    this.fileLog?.end();
     this.emit('stopped');
   }
 
