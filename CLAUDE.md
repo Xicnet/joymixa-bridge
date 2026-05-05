@@ -67,6 +67,8 @@ stream opened, single-number ms result, `null` on failure (never throw).
 - `docs/game-bundle.md` — Game bundling: asset copy script, WebView overview
 - `docs/protocol.md` — WebSocket protocol spec (all message types, fields, behavior)
 
+**Internal contributors:** the bridge participates in a contract with a separate frontend repo. Any work touching audio, sync, phase alignment, latency measurement, or the WebSocket payload requires reading the frontend-side specs that define the consumer's expectations. The catalogue of those specs and the workflow for reading them lives in `CLAUDE.local.md` (gitignored). If you don't have it, ask the maintainer.
+
 ## Game assets — NEVER commit to this repo
 
 Bundle variants embed pre-built web app assets via `scripts/copy-game-assets.sh`,

@@ -594,12 +594,11 @@ export class Bridge extends EventEmitter {
     }, this.LATENCY_REFRESH_MS);
 
     // Link callbacks
-    this.link.setTempoCallback((rawTempo: number) => {
-      const tempo = rawTempo;
-      // beat/phase are approximate — TSFN scheduling delay means getState()
-      // captures "now" (callback execution time), not the moment Link changed
-      // tempo. Frontend uses periodic state messages for timing, not this event.
-      const { beat, phase } = this.link!.getState(this.config.quantum);
+    this.link.setTempoCallback((_rawTempo: number) => {
+      // Use getState().tempo (sessionState.tempo()) which Link docs define as
+      // "a stable value appropriate for display" — the raw callback double has
+      // floating-point noise (e.g. 128.99980 instead of 129).
+      const { tempo, beat, phase } = this.link!.getState(this.config.quantum);
       this.log(`[bridge] tempo from Link: ${tempo}`);
       this.broadcast({ type: 'tempo', tempo, beat, phase, quantum: this.config.quantum });
       this.emit('tempo', tempo);
