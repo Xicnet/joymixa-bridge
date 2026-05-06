@@ -77,6 +77,7 @@ export class Bridge extends EventEmitter {
   private clients = new Set<WebSocket>();
   private clientLoopBeats = new Map<WebSocket, number>();
   private stateInterval: ReturnType<typeof setInterval> | null = null;
+  private lastLoggedStateTempo: number | null = null;
   private running = false;
   // Phase-alignment diagnostics — set false before release builds.
   private diagLog = true;
@@ -602,14 +603,27 @@ export class Bridge extends EventEmitter {
     }, this.LATENCY_REFRESH_MS);
 
     // Link callbacks
-    this.link.setTempoCallback((_rawTempo: number) => {
-      // Use getState().tempo (sessionState.tempo()) which Link docs define as
-      // "a stable value appropriate for display" — the raw callback double has
-      // floating-point noise (e.g. 128.99980 instead of 129).
-      const { tempo, beat, phase } = this.link!.getState(this.config.quantum);
-      this.log(`[bridge] tempo from Link: ${tempo}`);
-      this.broadcast({ type: 'tempo', tempo, beat, phase, quantum: this.config.quantum });
-      this.emit('tempo', tempo);
+    this.log(`[bridge] registering setTempoCallback`);
+    this.link.setTempoCallback((rawTempo: number) => {
+      try {
+        // Use getState().tempo (sessionState.tempo()) which Link docs define as
+        // "a stable value appropriate for display" — the raw callback double has
+        // floating-point noise (e.g. 128.99980 instead of 129).
+        const { tempo, beat, phase } = this.link!.getState(this.config.quantum);
+        const ts = Date.now();
+        // Q1 spike: the Link timeline is a piecewise-linear function beat = f(time).
+        // anchorTime = Link clock time (seconds) at which `beat` occurs. The frontend
+        // uses {beat, anchorTime, tempo} to evaluate
+        //   beatAtTime(t) = beat + (t - anchorTime) * tempo / 60   (t in Link clock domain)
+        // Combined with `ts` (Date.now at broadcast), the frontend can map between
+        // wall clock and Link clock with sub-ms accuracy.
+        const anchorTime = this.link!.getTimeForBeat(beat, this.config.quantum);
+        this.log(`[bridge] tempo from Link: ${tempo} beat=${beat.toFixed(3)} phase=${phase.toFixed(3)}/${this.config.quantum} anchorTime=${anchorTime.toFixed(6)} ts=${ts} rawCb=${rawTempo}`);
+        this.broadcast({ type: 'tempo', tempo, beat, phase, quantum: this.config.quantum, ts, anchorTime });
+        this.emit('tempo', tempo);
+      } catch (e) {
+        this.warn(`[bridge] tempo callback EXCEPTION: ${e instanceof Error ? e.stack : String(e)}`);
+      }
     });
 
     this.link.setStartStopCallback((isPlaying: boolean) => {
@@ -682,6 +696,14 @@ export class Bridge extends EventEmitter {
       const jmxBeat = this.getJmxBeat();
       const ts = Date.now();
       const linkState = this.getLinkState();
+      // Diagnostic: log state-path tempo when it diverges from the last logged value.
+      // The setTempoCallback path and this state path both call sessionState.tempo()
+      // independently; logging here lets us see whether they agree across an event boundary.
+      // Threshold of 0.05 BPM keeps steady-state quiet while surfacing real divergence.
+      if (this.lastLoggedStateTempo === null || Math.abs(linkState.tempo - this.lastLoggedStateTempo) > 0.05) {
+        this.log(`[bridge] state tempo=${linkState.tempo} beat=${linkState.beat.toFixed(3)} phase=${linkState.phase.toFixed(3)}/${linkState.quantum}`);
+        this.lastLoggedStateTempo = linkState.tempo;
+      }
       this.broadcast({
         type: 'state',
         ...linkState,
@@ -747,7 +769,7 @@ export class Bridge extends EventEmitter {
     return this.running;
   }
 
-  private getLinkState(): Omit<BridgeState, 'numClients'> {
+  private getLinkState(): Omit<BridgeState, 'numClients'> & { anchorTime?: number } {
     if (!this.link) {
       return {
         tempo: this.config.defaultBpm,
@@ -764,6 +786,8 @@ export class Bridge extends EventEmitter {
     const remainingBeats = quantum - phase;
     const msPerBeat = 60000 / tempo;
     const nextBar0Delay = remainingBeats * msPerBeat;
+    // Q2: include Link timeline anchor so clients can locally reconstruct beatAtTime.
+    const anchorTime = this.link.getTimeForBeat(beat, quantum);
 
 
     // Range validation — always on (indicates bugs, not diagnostics)
@@ -786,6 +810,7 @@ export class Bridge extends EventEmitter {
       quantum,
       numPeers: this.link.getNumPeers(),
       nextBar0Delay,
+      anchorTime,
     };
   }
 
