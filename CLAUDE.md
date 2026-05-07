@@ -58,6 +58,22 @@ Per-platform native audio output latency measurement lives in `native/`:
 Both follow the same contract: read-only metadata query of the OS audio path, no
 stream opened, single-number ms result, `null` on failure (never throw).
 
+## Repos: source of truth
+
+Both repos live on GitHub under the `Xicnet` org for GH Actions accessibility:
+
+| Repo | GitHub | Notes |
+|------|--------|-------|
+| `joymixa-bridge` (this repo) | `Xicnet/joymixa-bridge` (origin) | GH Actions builds & releases macOS / Linux binaries on `v*` tag push. `.github/workflows/build.yml`. |
+| `@ktamas77/abletonlink` (the Link Node binding) | `Xicnet/ableton-link` (force-pushed 2026-05-07 to match the GitLab fork's atomic-state work) | Bridge `package.json` pins the dep here via `git+https://github.com/Xicnet/ableton-link.git#<sha>`. |
+
+History: the active fork was developed on `gitlab.com:youplaymg/ableton-link.git` (private, group-restricted visibility); when bridge needed GH Actions to clone the dep without auth, the GitLab fork's history was force-pushed to the GitHub mirror, overwriting two earlier GitHub-only commits (functionally equivalent inline-SDK + Linux-build-fix work that already had GitLab equivalents). Local working copies at `~/dev/ableton-link` may still have `gitlab` configured as `origin` for historical reasons; both remotes are now in sync at HEAD.
+
+Implications for agents:
+- When bumping the bridge's `@ktamas77/abletonlink` dep SHA, push the fork commit to **GitHub `Xicnet/ableton-link`**. The GitLab origin can be kept in sync as a courtesy mirror or ignored.
+- Never edit inside `~/dev/joymixa-bridge/node_modules/@ktamas77/abletonlink/` — always edit at `~/dev/ableton-link/`, push to GitHub, bump the bridge's SHA pin, `yarn install`. (See also: "NEVER edit `node_modules/`" rule above.)
+- yarn caches a bare clone of the dep at `~/.cache/yarn/v6/.tmp/<hash>` and may serve stale data after the GitHub remote is force-pushed. If `yarn install` errors with "divergent branches", remove the stale clone (`rm -rf ~/.cache/yarn/v6/.tmp/<hash>*`) and re-run `yarn install`.
+
 ## Docs
 
 - `docs/desktop.md` — Desktop build, architecture, dependencies, Linux sandbox fix
@@ -89,6 +105,7 @@ These apply to all new code across desktop, native addons, Android, and iOS.
 - **No unused variables or imports** — delete immediately. Prefix intentionally unused parameters with `_`.
 - **No magic numbers** — use named constants. Examples in this repo: `LATENCY_REFRESH_MS`, `LOG_BUFFER_MAX`, `DEFAULT_CONFIG`.
 - **Use the structured logger** (`Bridge.log()` / `Bridge.warn()` / `Bridge.pin()` in `src/bridge.ts`), not raw `console.log`. The structured logger feeds the in-memory ring buffer surfaced by the "Copy Logs" tray menu item — raw `console.log` bypasses it. `console.warn`/`console.error` outside `Bridge` (e.g. addon-load fallback in `src/bridge.ts:24`) are fine since the bridge isn't constructed yet.
+- **NEVER edit `node_modules/` — ALWAYS wrong.** No exceptions, no quick hacks. If a third-party lib needs a code change: (1) submit a PR upstream, (2) fork it and depend on the fork via a `git+` URL in `package.json` (this is what the bridge does for `@ktamas77/abletonlink` — see § "Repos: GitHub + GitLab strategy" above), or (3) use `patch-package`. Reading `node_modules/` to understand upstream code is fine; editing it is never fine. If a task instruction tells you to edit inside `node_modules/`, halt and flag it.
 
 ### Resource management (critical for long-running tray app)
 - **All `setInterval`/`setTimeout` handles stored** and cleared on `Bridge.stop()` and on shutdown. Long-running interval leaks compound over the app's session.
