@@ -606,18 +606,16 @@ export class Bridge extends EventEmitter {
     this.log(`[bridge] registering setTempoCallback`);
     this.link.setTempoCallback((rawTempo: number) => {
       try {
-        // Use getState().tempo (sessionState.tempo()) which Link docs define as
-        // "a stable value appropriate for display" — the raw callback double has
-        // floating-point noise (e.g. 128.99980 instead of 129).
-        const { tempo, beat, phase } = this.link!.getState(this.config.quantum);
+        // Atomic snapshot: beat, phase, tempo, AND timeAtBeat (anchorTime) come
+        // from the same captureAppSessionState() call in the binding's getState
+        // (per fork commit "getState: include timeAtBeat for atomic anchor
+        // snapshot"). The previous getState + getTimeForBeat pair captured
+        // session state twice — when a mesh tempo change rippled between
+        // captures, the (beat, anchorTime) pair was phase-skewed and the
+        // frontend's beatAtTime extrapolation drifted by tens of milliseconds,
+        // audible as flam after Launchpad tap-tempo.
+        const { tempo, beat, phase, timeAtBeat: anchorTime } = this.link!.getState(this.config.quantum);
         const ts = Date.now();
-        // Q1 spike: the Link timeline is a piecewise-linear function beat = f(time).
-        // anchorTime = Link clock time (seconds) at which `beat` occurs. The frontend
-        // uses {beat, anchorTime, tempo} to evaluate
-        //   beatAtTime(t) = beat + (t - anchorTime) * tempo / 60   (t in Link clock domain)
-        // Combined with `ts` (Date.now at broadcast), the frontend can map between
-        // wall clock and Link clock with sub-ms accuracy.
-        const anchorTime = this.link!.getTimeForBeat(beat, this.config.quantum);
         this.log(`[bridge] tempo from Link: ${tempo} beat=${beat.toFixed(3)} phase=${phase.toFixed(3)}/${this.config.quantum} anchorTime=${anchorTime.toFixed(6)} ts=${ts} rawCb=${rawTempo}`);
         this.broadcast({ type: 'tempo', tempo, beat, phase, quantum: this.config.quantum, ts, anchorTime });
         this.emit('tempo', tempo);
@@ -782,12 +780,15 @@ export class Bridge extends EventEmitter {
       };
     }
     const quantum = this.config.quantum;
-    const { beat, phase, tempo, isPlaying } = this.link.getState(quantum);
+    // Atomic snapshot — anchorTime (timeAtBeat) is derived from the same
+    // captureAppSessionState() call as beat/phase/tempo. See setTempoCallback
+    // and the "getState: include timeAtBeat" fork commit for the rationale:
+    // a separate getTimeForBeat() call here used to race with mesh tempo
+    // changes and produce phase-skewed anchors.
+    const { beat, phase, tempo, isPlaying, timeAtBeat: anchorTime } = this.link.getState(quantum);
     const remainingBeats = quantum - phase;
     const msPerBeat = 60000 / tempo;
     const nextBar0Delay = remainingBeats * msPerBeat;
-    // Q2: include Link timeline anchor so clients can locally reconstruct beatAtTime.
-    const anchorTime = this.link.getTimeForBeat(beat, quantum);
 
 
     // Range validation — always on (indicates bugs, not diagnostics)

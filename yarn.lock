@@ -667,9 +667,9 @@
     "@jridgewell/resolve-uri" "^3.1.0"
     "@jridgewell/sourcemap-codec" "^1.4.14"
 
-"@ktamas77/abletonlink@git+https://github.com/Xicnet/ableton-link.git":
-  version "1.2.3"
-  resolved "git+https://github.com/Xicnet/ableton-link.git#24af2eee5f771e60d9be4dbcb065a0a99361afb9"
+"@ktamas77/abletonlink@git+ssh://git@gitlab.com/youplaymg/ableton-link.git#3bca7d077d862df314244001fabb600e65de7f86":
+  version "1.2.4"
+  resolved "git+ssh://git@gitlab.com/youplaymg/ableton-link.git#3bca7d077d862df314244001fabb600e65de7f86"
   dependencies:
     bindings "^1.5.0"
     node-addon-api "^8.0.0"
