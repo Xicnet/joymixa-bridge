@@ -16,8 +16,6 @@ jobs:
             targets: '@electron-forge/maker-deb,@electron-forge/maker-zip'
           - os: macos-latest
             targets: '@electron-forge/maker-zip'
-          - os: windows-latest
-            targets: '@electron-forge/maker-squirrel'
 
     runs-on: ${{ matrix.os }}
 
