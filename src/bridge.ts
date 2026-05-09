@@ -5,7 +5,7 @@ import { execFile } from 'child_process';
 import { readFile, readdir } from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
-import { createWriteStream, WriteStream } from 'fs';
+import { createWriteStream, writeFileSync, WriteStream } from 'fs';
 
 // CoreAudio native addon (macOS only) — returns null on other platforms
 interface CoreAudioResult {
@@ -50,6 +50,24 @@ export interface BridgeConfig {
   defaultBpm: number;
   quantum: number;
   stateHz: number;
+}
+
+/** [X02] Shape of a single log entry inside a `log-drain-response` payload. */
+interface LogEntry {
+  ts: number;
+  channel: string;
+  level: string;
+  msg: string;
+}
+
+/** [X02] Validate one entry from an untrusted client `log-drain-response`. */
+function isLogEntry(e: unknown): e is LogEntry {
+  if (!e || typeof e !== 'object') return false;
+  const r = e as Record<string, unknown>;
+  return typeof r.ts === 'number'
+      && typeof r.channel === 'string'
+      && typeof r.level === 'string'
+      && typeof r.msg === 'string';
 }
 
 export interface BridgeState {
@@ -97,13 +115,14 @@ export class Bridge extends EventEmitter {
   // File log (dev only)
   private fileLog: WriteStream | null = null;
 
-  // [X01] Per-client log siphon state. Each connecting client gets the
-  // lowest free index (1, 2, 3, …) and a write stream to
-  // /tmp/joymixa-client-N.log. Indices ARE recycled — when a client
-  // disconnects, its slot is freed and the next connect picks it up. Streams
-  // open with flags:'w' so reused slots overwrite the previous session's file.
+  // [X02] Per-client index for on-demand log drain. Each connecting client
+  // gets the lowest free index (1, 2, 3, …); on drain, that client's ring
+  // buffer is written to /tmp/joymixa-client-N.log. Indices ARE recycled —
+  // when a client disconnects, its slot is freed and the next connect picks
+  // it up. The drain handler writes with overwrite semantics, so reused slots
+  // replace the previous session's file. No streaming write path: nothing
+  // touches the file system between drain events.
   private clientIndices = new Map<WebSocket, number>();
-  private clientLogStreams = new Map<WebSocket, WriteStream>();
 
   /** Returns the lowest positive integer not currently held by any connected client. */
   private allocateClientIndex(): number {
@@ -669,15 +688,13 @@ export class Bridge extends EventEmitter {
 
       this.clients.add(ws);
 
-      // [X01] Assign lowest-free index and open per-client log stream. Indices
-      // are recycled on disconnect, so two simultaneous tabs always land on
-      // /tmp/joymixa-client-1.log and /tmp/joymixa-client-2.log.
+      // [X02] Assign lowest-free index. Indices are recycled on disconnect,
+      // so two simultaneous tabs always land on /tmp/joymixa-client-1.log and
+      // /tmp/joymixa-client-2.log when drain is triggered. No file is opened
+      // here — drain is the only file-I/O point.
       const clientIndex = this.allocateClientIndex();
       this.clientIndices.set(ws, clientIndex);
-      const clientLogPath = `/tmp/joymixa-client-${clientIndex}.log`;
-      const clientLogStream = createWriteStream(clientLogPath, { flags: 'w' });
-      this.clientLogStreams.set(ws, clientLogStream);
-      this.log(`[bridge] client ${clientIndex} connected. clients: ${this.clients.size} log: ${clientLogPath}`);
+      this.log(`[bridge] client ${clientIndex} connected. clients: ${this.clients.size}`);
       this.emit('clients', this.clients.size);
 
       // Initial snapshot
@@ -720,17 +737,12 @@ export class Bridge extends EventEmitter {
       ws.on('close', () => {
         this.clients.delete(ws);
         this.clientLoopBeats.delete(ws);
-        // [X01] Close per-client log stream and drop tracking entries. Index
-        // is not recycled.
-        const stream = this.clientLogStreams.get(ws);
-        if (stream) {
-          stream.end();
-          this.clientLogStreams.delete(ws);
-        }
+        // [X02] Drop tracking entries. Index slot is freed for reuse by the
+        // next connection. No stream to close — drain is on-demand only.
         const idx = this.clientIndices.get(ws);
         this.clientIndices.delete(ws);
         if (idx !== undefined) {
-          this.log(`[bridge] client ${idx} disconnected. clients: ${this.clients.size} log closed`);
+          this.log(`[bridge] client ${idx} disconnected. clients: ${this.clients.size}`);
         } else {
           this.log(`[bridge] client disconnected. clients: ${this.clients.size}`);
         }
@@ -789,13 +801,9 @@ export class Bridge extends EventEmitter {
       for (const ws of this.clients) {
         ws.close();
       }
-      // [X01] Close any remaining per-client log streams. WS close handlers
-      // would also close them, but during process shutdown the events may not
-      // fire — flush explicitly here.
-      for (const stream of this.clientLogStreams.values()) {
-        stream.end();
-      }
-      this.clientLogStreams.clear();
+      // [X02] No per-client log streams to flush — drain is on-demand only,
+      // and any pending drain response after stop() will be dropped along
+      // with the closed sockets.
       this.clientIndices.clear();
       this.clients.clear();
       this.clientLoopBeats.clear();
@@ -822,6 +830,18 @@ export class Bridge extends EventEmitter {
 
   isRunning(): boolean {
     return this.running;
+  }
+
+  /**
+   * [X02] Broadcast a `log-drain` request to all connected clients. Each
+   * client responds with `log-drain-response` carrying its in-memory ring
+   * buffer; the response handler in `handleClientMessage` writes the entries
+   * to /tmp/joymixa-client-N.log with overwrite semantics. Triggered by the
+   * "Drain Client Logs" tray menu item — never on a hot path.
+   */
+  public requestLogDrain(): void {
+    this.broadcast({ type: 'log-drain' });
+    this.log(`[bridge] log drain requested for ${this.clients.size} client(s)`);
   }
 
   private getLinkState(): Omit<BridgeState, 'numClients'> & { anchorTime?: number } {
@@ -885,22 +905,26 @@ export class Bridge extends EventEmitter {
       return;
     }
 
-    // [X01] Per-client log siphon. Lines arrive pre-formatted from the client's
-    // Logger; we prepend `bridgeRxTs` and `wsLagMs` so two clients' files can
-    // be aligned without trusting per-tab Date.now() consistency.
-    if (msg.type === 'log'
-        && typeof msg.channel === 'string'
-        && typeof msg.level === 'string'
-        && typeof msg.msg === 'string'
-        && typeof msg.ts === 'number') {
-      const stream = this.clientLogStreams.get(sender);
-      if (stream) {
-        const idx = this.clientIndices.get(sender) ?? 0;
+    // [X02] On-demand log drain response. Client returns its full ring buffer
+    // in a single message; we prepend `bridgeRxTs` and `wsLagMs` so two
+    // clients' files can be aligned without trusting per-tab Date.now()
+    // consistency, then OVERWRITE the per-client log file in one shot. No
+    // streaming write path — the file is touched only when the user clicks
+    // "Drain Client Logs" in the tray menu.
+    if (msg.type === 'log-drain-response' && Array.isArray(msg.entries)) {
+      const idx = this.clientIndices.get(sender) ?? 0;
+      const filePath = `/tmp/joymixa-client-${idx}.log`;
+      let body = '';
+      let validCount = 0;
+      for (const e of msg.entries) {
+        if (!isLogEntry(e)) continue;
         const bridgeRxTs = Date.now();
-        const wsLagMs = bridgeRxTs - msg.ts;
-        const line = `${new Date(msg.ts).toISOString()} bridgeRxTs=${bridgeRxTs} wsLagMs=${wsLagMs} client=${idx} [${msg.channel}/${msg.level}] ${msg.msg}\n`;
-        stream.write(line);
+        const wsLagMs = bridgeRxTs - e.ts;
+        body += `${new Date(e.ts).toISOString()} bridgeRxTs=${bridgeRxTs} wsLagMs=${wsLagMs} client=${idx} [${e.channel}/${e.level}] ${e.msg}\n`;
+        validCount++;
       }
+      writeFileSync(filePath, body);
+      this.log(`[bridge] drained ${validCount}/${msg.entries.length} entries from client ${idx} → ${filePath}`);
       return;
     }
 
