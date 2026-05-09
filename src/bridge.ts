@@ -641,6 +641,16 @@ export class Bridge extends EventEmitter {
     this.log(`[bridge] WebSocket listening on ws://0.0.0.0:${this.config.port}`);
 
     this.wss.on('connection', (ws: WebSocket) => {
+      // Disable Nagle on this connection to eliminate TCP-level coalescing
+      // jitter for our tiny 100Hz state-broadcast frames. Validated against
+      // joymixa D2 measurement showing occasional 10-11ms WS jitter spikes.
+      const sock = (ws as unknown as { _socket?: { setNoDelay?: (b: boolean) => void } })._socket;
+      if (sock?.setNoDelay) {
+        sock.setNoDelay(true);
+      } else {
+        this.log(`[bridge] WARN: unable to access _socket.setNoDelay; Nagle still active`);
+      }
+
       this.clients.add(ws);
       this.log(`[bridge] client connected. clients: ${this.clients.size}`);
       this.emit('clients', this.clients.size);
