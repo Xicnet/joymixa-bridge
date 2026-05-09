@@ -97,6 +97,22 @@ export class Bridge extends EventEmitter {
   // File log (dev only)
   private fileLog: WriteStream | null = null;
 
+  // [X01] Per-client log siphon state. Each connecting client gets the
+  // lowest free index (1, 2, 3, …) and a write stream to
+  // /tmp/joymixa-client-N.log. Indices ARE recycled — when a client
+  // disconnects, its slot is freed and the next connect picks it up. Streams
+  // open with flags:'w' so reused slots overwrite the previous session's file.
+  private clientIndices = new Map<WebSocket, number>();
+  private clientLogStreams = new Map<WebSocket, WriteStream>();
+
+  /** Returns the lowest positive integer not currently held by any connected client. */
+  private allocateClientIndex(): number {
+    const inUse = new Set(this.clientIndices.values());
+    let i = 1;
+    while (inUse.has(i)) i++;
+    return i;
+  }
+
   constructor(config?: Partial<BridgeConfig>) {
     super();
     this.config = { ...DEFAULT_CONFIG, ...config };
@@ -652,7 +668,16 @@ export class Bridge extends EventEmitter {
       }
 
       this.clients.add(ws);
-      this.log(`[bridge] client connected. clients: ${this.clients.size}`);
+
+      // [X01] Assign lowest-free index and open per-client log stream. Indices
+      // are recycled on disconnect, so two simultaneous tabs always land on
+      // /tmp/joymixa-client-1.log and /tmp/joymixa-client-2.log.
+      const clientIndex = this.allocateClientIndex();
+      this.clientIndices.set(ws, clientIndex);
+      const clientLogPath = `/tmp/joymixa-client-${clientIndex}.log`;
+      const clientLogStream = createWriteStream(clientLogPath, { flags: 'w' });
+      this.clientLogStreams.set(ws, clientLogStream);
+      this.log(`[bridge] client ${clientIndex} connected. clients: ${this.clients.size} log: ${clientLogPath}`);
       this.emit('clients', this.clients.size);
 
       // Initial snapshot
@@ -662,6 +687,7 @@ export class Bridge extends EventEmitter {
         type: 'hello',
         ...helloState,
         numClients: this.clients.size,
+        clientIndex,
         ...(jmxBeat !== undefined && { jmxBeat }),
         ...(this.measuredOutputLatency !== null
           ? {
@@ -694,7 +720,20 @@ export class Bridge extends EventEmitter {
       ws.on('close', () => {
         this.clients.delete(ws);
         this.clientLoopBeats.delete(ws);
-        this.log(`[bridge] client disconnected. clients: ${this.clients.size}`);
+        // [X01] Close per-client log stream and drop tracking entries. Index
+        // is not recycled.
+        const stream = this.clientLogStreams.get(ws);
+        if (stream) {
+          stream.end();
+          this.clientLogStreams.delete(ws);
+        }
+        const idx = this.clientIndices.get(ws);
+        this.clientIndices.delete(ws);
+        if (idx !== undefined) {
+          this.log(`[bridge] client ${idx} disconnected. clients: ${this.clients.size} log closed`);
+        } else {
+          this.log(`[bridge] client disconnected. clients: ${this.clients.size}`);
+        }
         this.emit('clients', this.clients.size);
       });
     });
@@ -750,6 +789,14 @@ export class Bridge extends EventEmitter {
       for (const ws of this.clients) {
         ws.close();
       }
+      // [X01] Close any remaining per-client log streams. WS close handlers
+      // would also close them, but during process shutdown the events may not
+      // fire — flush explicitly here.
+      for (const stream of this.clientLogStreams.values()) {
+        stream.end();
+      }
+      this.clientLogStreams.clear();
+      this.clientIndices.clear();
       this.clients.clear();
       this.clientLoopBeats.clear();
       this.wss.close();
@@ -835,6 +882,25 @@ export class Bridge extends EventEmitter {
     // Joymixa loop-beat: store per-client, included in state broadcasts
     if (msg.type === 'loop-beat' && typeof msg.beat === 'number') {
       this.clientLoopBeats.set(sender, msg.beat);
+      return;
+    }
+
+    // [X01] Per-client log siphon. Lines arrive pre-formatted from the client's
+    // Logger; we prepend `bridgeRxTs` and `wsLagMs` so two clients' files can
+    // be aligned without trusting per-tab Date.now() consistency.
+    if (msg.type === 'log'
+        && typeof msg.channel === 'string'
+        && typeof msg.level === 'string'
+        && typeof msg.msg === 'string'
+        && typeof msg.ts === 'number') {
+      const stream = this.clientLogStreams.get(sender);
+      if (stream) {
+        const idx = this.clientIndices.get(sender) ?? 0;
+        const bridgeRxTs = Date.now();
+        const wsLagMs = bridgeRxTs - msg.ts;
+        const line = `${new Date(msg.ts).toISOString()} bridgeRxTs=${bridgeRxTs} wsLagMs=${wsLagMs} client=${idx} [${msg.channel}/${msg.level}] ${msg.msg}\n`;
+        stream.write(line);
+      }
       return;
     }
 
