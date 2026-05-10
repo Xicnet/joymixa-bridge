@@ -49,7 +49,9 @@ class MainActivity : AppCompatActivity() {
                     quantum = obj.optDouble("quantum", 4.0),
                     numPeers = obj.optInt("numPeers", 0),
                     numClients = obj.optInt("numClients", 0),
-                    nextBar0Delay = obj.optDouble("nextBar0Delay", 0.0)
+                    nextBar0Delay = obj.optDouble("nextBar0Delay", 0.0),
+                    anchorTime = obj.optDouble("anchorTime", 0.0),
+                    ts = obj.optLong("ts", 0L)
                 )
                 updateUI(state)
             } catch (_: Exception) {}
@@ -80,6 +82,13 @@ class MainActivity : AppCompatActivity() {
             binding.launchGameButton.setOnClickListener {
                 startActivity(Intent(this, GameActivity::class.java))
             }
+        }
+
+        // [X02] Drain client log buffers to <externalFilesDir>/joymixa-client-N.log
+        // — same on-demand semantics as Electron's tray menu item. ADB pull
+        // retrieves the file for diagnostic inspection.
+        binding.drainLogsButton.setOnClickListener {
+            bridgeService?.requestLogDrain()
         }
     }
 

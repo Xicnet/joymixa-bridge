@@ -10,7 +10,11 @@ data class BridgeState(
     val quantum: Double = 4.0,
     val numPeers: Int = 0,
     val numClients: Int = 0,
-    val nextBar0Delay: Double = 0.0
+    val nextBar0Delay: Double = 0.0,
+    /** Link timeAtBeat (seconds, Link clock domain) — anchorTime in wire format. */
+    val anchorTime: Double = 0.0,
+    /** Bridge wallclock at message construction (System.currentTimeMillis()). */
+    val ts: Long = 0L
 ) {
     /** Round tempo to 2 decimal places, same as desktop bridge. */
     val tempoRounded: Double get() = Math.round(tempo * 100.0) / 100.0
@@ -26,6 +30,8 @@ data class BridgeState(
         obj.put("numPeers", numPeers)
         obj.put("numClients", numClients)
         obj.put("nextBar0Delay", nextBar0Delay)
+        obj.put("anchorTime", anchorTime)
+        obj.put("ts", ts)
         for ((k, v) in extra) {
             if (v != null) obj.put(k, v)
         }

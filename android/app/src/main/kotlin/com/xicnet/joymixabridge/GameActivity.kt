@@ -117,7 +117,7 @@ class GameActivity : AppCompatActivity() {
             }
         }
 
-        webView.loadUrl("https://appassets.androidplatform.net/game/game/index.html")
+        webView.loadUrl("https://appassets.androidplatform.net/game/game/index.html?experimental=1")
     }
 
     /** Native HTTP bridge for log-relay.ts — bypasses mixed-content restrictions. */

@@ -1,5 +1,23 @@
 package com.xicnet.joymixabridge
 
+/**
+ * Atomic Link state snapshot — mirrors Electron's `link.getState(quantum)`.
+ * All fields come from a single `captureAppSessionState()` call on the C++
+ * side, so the (beat, anchorTime) pair never phase-skews when the mesh
+ * tempo ripples mid-capture.
+ *
+ * `timeAtBeat` is in seconds (Link clock domain); pass through unchanged
+ * as `anchorTime` in bridge wire messages — the Electron bridge does the
+ * same at `src/bridge.ts:865`.
+ */
+data class LinkState(
+    val tempo: Double,
+    val beat: Double,
+    val phase: Double,
+    val isPlaying: Boolean,
+    val timeAtBeat: Double
+)
+
 class LinkSession {
 
     interface LinkListener {
@@ -71,6 +89,37 @@ class LinkSession {
         if (handle != 0L) nativeForceBeatAtTime(handle, beat, time, quantum)
     }
 
+    /**
+     * Atomic snapshot — mirrors Electron's `link.getState(quantum)`.
+     * The five returned fields are read from ONE C++-side
+     * captureAppSessionState() call. See LinkWrapper.cpp::nativeGetState.
+     */
+    fun getState(quantum: Double = QUANTUM): LinkState {
+        if (handle == 0L) return LinkState(120.0, 0.0, 0.0, false, 0.0)
+        val arr = nativeGetState(handle, quantum)
+            ?: return LinkState(120.0, 0.0, 0.0, false, 0.0)
+        return LinkState(
+            tempo = arr[0],
+            beat = arr[1],
+            phase = arr[2],
+            isPlaying = arr[3] > 0.5,
+            timeAtBeat = arr[4]
+        )
+    }
+
+    /** timeAtBeat helper — seconds, in Link clock domain. */
+    fun timeAtBeat(beat: Double, quantum: Double): Double =
+        if (handle != 0L) nativeTimeAtBeat(handle, beat, quantum) else 0.0
+
+    /**
+     * Mirrors Electron's `link.setIsPlayingAndRequestBeatAtTime` —
+     * starts/stops transport at `timeMicros` AND requests `beat` to map
+     * to that time. Atomic on the C++ side.
+     */
+    fun setIsPlayingAndRequestBeatAtTime(isPlaying: Boolean, timeMicros: Long, beat: Double, quantum: Double) {
+        if (handle != 0L) nativeSetIsPlayingAndRequestBeatAtTime(handle, isPlaying, timeMicros, beat, quantum)
+    }
+
     fun setListener(listener: LinkListener?) {
         if (handle != 0L) nativeSetCallbacks(handle, listener)
     }
@@ -91,4 +140,9 @@ class LinkSession {
     private external fun nativeRequestBeatAtStartPlayingTime(handle: Long, beat: Double, quantum: Double)
     private external fun nativeForceBeatAtTime(handle: Long, beat: Double, time: Long, quantum: Double)
     private external fun nativeSetCallbacks(handle: Long, listener: LinkListener?)
+    private external fun nativeGetState(handle: Long, quantum: Double): DoubleArray?
+    private external fun nativeTimeAtBeat(handle: Long, beat: Double, quantum: Double): Double
+    private external fun nativeSetIsPlayingAndRequestBeatAtTime(
+        handle: Long, isPlaying: Boolean, timeMicros: Long, beat: Double, quantum: Double
+    )
 }

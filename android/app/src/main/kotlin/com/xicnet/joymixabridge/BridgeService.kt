@@ -52,6 +52,22 @@ class BridgeService : Service() {
     private val clientsLock = Any()
     private val clientLoopBeats = mutableMapOf<WebSocket, Double>()
 
+    // [X02] Per-client index for on-demand log drain. Each connecting client
+    // gets the lowest free index; on drain, that client's ring buffer is
+    // written to <externalFilesDir>/joymixa-client-N.log. Indices ARE recycled
+    // on disconnect, matching Electron bridge semantics.
+    private val clientIndices = mutableMapOf<WebSocket, Int>()
+
+    /** Returns the lowest positive integer not currently held by any connected client. */
+    private fun allocateClientIndex(): Int {
+        synchronized(clientsLock) {
+            val inUse = clientIndices.values.toSet()
+            var i = 1
+            while (inUse.contains(i)) i++
+            return i
+        }
+    }
+
     // Locks
     private var multicastLock: WifiManager.MulticastLock? = null
     private var wakeLock: PowerManager.WakeLock? = null
@@ -94,22 +110,29 @@ class BridgeService : Service() {
         super.onDestroy()
     }
 
+    /**
+     * Capture an atomic Link state snapshot and wrap it in a BridgeState.
+     * Mirrors Electron's `getLinkState()` (src/bridge.ts:847) — the (beat,
+     * phase, tempo, isPlaying, anchorTime) tuple comes from a SINGLE
+     * captureAppSessionState() call so no field can phase-skew with
+     * another. `ts` is the bridge wallclock, set per call.
+     */
     fun getCurrentState(): BridgeState {
-        val tempo = linkSession.getTempo()
-        val beat = linkSession.getBeat()
-        val phase = linkSession.getPhase(LinkSession.QUANTUM)
+        val s = linkSession.getState(LinkSession.QUANTUM)
         val quantum = LinkSession.QUANTUM
-        val remainingBeats = quantum - phase
-        val msPerBeat = 60000.0 / tempo
+        val remainingBeats = quantum - s.phase
+        val msPerBeat = 60000.0 / s.tempo
         return BridgeState(
-            tempo = tempo,
-            isPlaying = linkSession.isPlaying(),
-            beat = beat,
-            phase = phase,
+            tempo = s.tempo,
+            isPlaying = s.isPlaying,
+            beat = s.beat,
+            phase = s.phase,
             quantum = quantum,
             numPeers = linkSession.getNumPeers(),
             numClients = synchronized(clientsLock) { clients.size },
-            nextBar0Delay = remainingBeats * msPerBeat
+            nextBar0Delay = remainingBeats * msPerBeat,
+            anchorTime = s.timeAtBeat,
+            ts = System.currentTimeMillis()
         )
     }
 
@@ -347,15 +370,20 @@ class BridgeService : Service() {
 
         linkSession.setListener(object : LinkSession.LinkListener {
             override fun onTempoChanged(tempo: Double) {
-                val rounded = Math.round(tempo * 100.0) / 100.0
-                val beat = linkSession.getBeat()
-                val phase = linkSession.getPhase(LinkSession.QUANTUM)
+                // Atomic snapshot — beat, phase, anchorTime all derive from
+                // the same captureAppSessionState() call (T21 fix). Mirrors
+                // Electron's setTempoCallback at src/bridge.ts:642.
+                val s = linkSession.getState(LinkSession.QUANTUM)
+                val rounded = Math.round(s.tempo * 100.0) / 100.0
+                val ts = System.currentTimeMillis()
                 val msg = JSONObject().apply {
                     put("type", "tempo")
                     put("tempo", rounded)
-                    put("beat", beat)
-                    put("phase", phase)
+                    put("beat", s.beat)
+                    put("phase", s.phase)
                     put("quantum", LinkSession.QUANTUM.toInt())
+                    put("anchorTime", s.timeAtBeat)
+                    put("ts", ts)
                 }
                 broadcast(msg.toString())
                 notifyStateUpdate()
@@ -365,6 +393,7 @@ class BridgeService : Service() {
                 val msg = JSONObject().apply {
                     put("type", "playing")
                     put("isPlaying", isPlaying)
+                    put("ts", System.currentTimeMillis())
                 }
                 broadcast(msg.toString())
                 notifyStateUpdate()
@@ -374,6 +403,7 @@ class BridgeService : Service() {
                 val msg = JSONObject().apply {
                     put("type", "peers")
                     put("numPeers", numPeers)
+                    put("ts", System.currentTimeMillis())
                 }
                 broadcast(msg.toString())
                 notifyStateUpdate()
@@ -394,15 +424,18 @@ class BridgeService : Service() {
         : WebSocketServer(address) {
 
         override fun onOpen(conn: WebSocket, handshake: ClientHandshake?) {
+            val clientIndex = allocateClientIndex()
             synchronized(clientsLock) {
                 clients.add(conn)
+                clientIndices[conn] = clientIndex
             }
-            Log.i(TAG, "Client connected. clients: ${synchronized(clientsLock) { clients.size }}")
+            Log.i(TAG, "Client $clientIndex connected. clients: ${synchronized(clientsLock) { clients.size }}")
 
-            // Send hello
+            // Send hello with atomic state (anchorTime + ts inside BridgeState.toJson)
             val state = getCurrentState()
             val jmxBeat = getJmxBeat()
             val extra = mutableMapOf<String, Any?>()
+            extra["clientIndex"] = clientIndex
             if (jmxBeat != null) extra["jmxBeat"] = jmxBeat
             measuredOutputLatency?.let { extra["measuredOutputLatency"] = it }
             extra["latencyMethod"] = latencyMethod ?: "none"
@@ -413,11 +446,13 @@ class BridgeService : Service() {
         }
 
         override fun onClose(conn: WebSocket, code: Int, reason: String?, remote: Boolean) {
+            val idx: Int?
             synchronized(clientsLock) {
                 clients.remove(conn)
                 clientLoopBeats.remove(conn)
+                idx = clientIndices.remove(conn)
             }
-            Log.i(TAG, "Client disconnected. clients: ${synchronized(clientsLock) { clients.size }}")
+            Log.i(TAG, "Client ${idx ?: "?"} disconnected. clients: ${synchronized(clientsLock) { clients.size }}")
             notifyStateUpdate()
         }
 
@@ -468,24 +503,37 @@ class BridgeService : Service() {
             return
         }
 
+        // [X02] On-demand log drain response from a client. Mirrors Electron's
+        // handler at src/bridge.ts:914. We OVERWRITE the per-client log file
+        // (no streaming append). File I/O moved to a worker — UI thread is
+        // never blocked.
+        if (type == "log-drain-response") {
+            val entries = msg.optJSONArray("entries") ?: return
+            val idx: Int = synchronized(clientsLock) { clientIndices[sender] ?: 0 }
+            handleLogDrainResponse(entries, idx)
+            return
+        }
+
         // Commands that require Link
         if (type == "set-tempo") {
             val tempo = msg.optDouble("tempo", Double.NaN)
             if (tempo.isNaN() || !tempo.isFinite() || tempo <= 0) return
             Log.i(TAG, "Client set-tempo: $tempo")
             linkSession.setTempo(tempo)
-            // Read back actual tempo from Link and broadcast
-            val actualTempo = linkSession.getTempo()
-            val beat = linkSession.getBeat()
-            val phase = linkSession.getPhase(LinkSession.QUANTUM)
+            // Atomic readback — same pattern as Electron's set-tempo handler
+            // (src/bridge.ts:933): one captureAppSessionState() call, all
+            // fields from the same snapshot.
+            val s = linkSession.getState(LinkSession.QUANTUM)
             val tempoMsg = JSONObject().apply {
                 put("type", "tempo")
-                put("tempo", actualTempo)
-                put("beat", beat)
-                put("phase", phase)
+                put("tempo", s.tempo)
+                put("beat", s.beat)
+                put("phase", s.phase)
                 put("quantum", LinkSession.QUANTUM.toInt())
+                put("anchorTime", s.timeAtBeat)
+                put("ts", System.currentTimeMillis())
             }
-            broadcast(tempoMsg.toString())
+            broadcastExcept(sender, tempoMsg.toString())
         }
 
         if (type == "play") {
@@ -501,9 +549,18 @@ class BridgeService : Service() {
         if (type == "request-quantized-start") {
             val quantum = if (msg.has("quantum") && !msg.optDouble("quantum", Double.NaN).isNaN())
                 msg.getDouble("quantum") else LinkSession.QUANTUM
-            Log.i(TAG, "Client request-quantized-start. quantum: $quantum")
-            linkSession.requestBeatAtStartPlayingTime(0.0, quantum)
-            linkSession.setIsPlaying(true)
+            // Match Electron pattern (src/bridge.ts:951-954):
+            //   const time = link.getTimeForBeat(link.getBeat(), quantum);
+            //   link.setIsPlayingAndRequestBeatAtTime(true, time, 0, quantum);
+            // requestBeatAtStartPlayingTime had subtly different semantics —
+            // setIsPlayingAndRequestBeatAtTime atomically maps beat=0 to
+            // the time at the current beat, giving deterministic bar-0
+            // alignment when crossing the start.
+            val s = linkSession.getState(quantum)
+            val timeSec = linkSession.timeAtBeat(s.beat, quantum)
+            val timeMicros = (timeSec * 1_000_000.0).toLong()
+            Log.i(TAG, "Client request-quantized-start. quantum=$quantum beat=${s.beat} timeMicros=$timeMicros")
+            linkSession.setIsPlayingAndRequestBeatAtTime(true, timeMicros, 0.0, quantum)
         }
 
         if (type == "force-beat-at-time") {
@@ -513,6 +570,76 @@ class BridgeService : Service() {
             if (!beat.isNaN() && time >= 0 && !quantum.isNaN()) {
                 Log.i(TAG, "Client force-beat-at-time: $beat $time $quantum")
                 linkSession.forceBeatAtTime(beat, time, quantum)
+            }
+        }
+    }
+
+    // ─── X02 log-drain protocol (port of bridge.ts:836-928) ───
+
+    /**
+     * Broadcast a `log-drain` request to all connected clients. Each client
+     * responds with `log-drain-response` carrying its in-memory ring buffer;
+     * the response handler writes one file per client to the app's external
+     * files dir (ADB pull-able). On-demand only — never on a hot path.
+     */
+    fun requestLogDrain() {
+        val n = synchronized(clientsLock) { clients.size }
+        broadcast(JSONObject().put("type", "log-drain").toString())
+        Log.i(TAG, "log drain requested for $n client(s)")
+    }
+
+    /**
+     * Validate one entry from an untrusted log-drain-response. Mirrors
+     * isLogEntry() at src/bridge.ts:64.
+     */
+    private fun isLogEntry(e: JSONObject): Boolean {
+        val tsField = e.opt("ts")
+        return tsField is Number
+            && e.opt("channel") is String
+            && e.opt("level") is String
+            && e.opt("msg") is String
+    }
+
+    private fun handleLogDrainResponse(entries: org.json.JSONArray, idx: Int) {
+        // File I/O runs off the calling thread (BridgeWebSocketServer's
+        // selector thread is hot). Snapshot what we need, then dispatch.
+        val total = entries.length()
+        // Pre-format on caller thread? No — JSONArray access is cheap; do
+        // everything on the worker to keep the WS thread free.
+        serviceScope.launch(Dispatchers.IO) {
+            try {
+                val externalDir = applicationContext.getExternalFilesDir(null)
+                if (externalDir == null) {
+                    Log.w(TAG, "log-drain: getExternalFilesDir returned null; cannot write")
+                    return@launch
+                }
+                val file = java.io.File(externalDir, "joymixa-client-${idx}.log")
+                val sb = StringBuilder()
+                var validCount = 0
+                val isoFmt = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US)
+                isoFmt.timeZone = java.util.TimeZone.getTimeZone("UTC")
+                for (i in 0 until total) {
+                    val e = entries.optJSONObject(i) ?: continue
+                    if (!isLogEntry(e)) continue
+                    val ts = e.optDouble("ts", 0.0).toLong()
+                    val channel = e.optString("channel")
+                    val level = e.optString("level")
+                    val text = e.optString("msg")
+                    val bridgeRxTs = System.currentTimeMillis()
+                    val wsLagMs = bridgeRxTs - ts
+                    val isoStr = isoFmt.format(java.util.Date(ts))
+                    sb.append(isoStr)
+                        .append(" bridgeRxTs=").append(bridgeRxTs)
+                        .append(" wsLagMs=").append(wsLagMs)
+                        .append(" client=").append(idx)
+                        .append(" [").append(channel).append('/').append(level).append("] ")
+                        .append(text).append('\n')
+                    validCount++
+                }
+                file.writeText(sb.toString())  // overwrite, matches Electron writeFileSync
+                Log.i(TAG, "drained $validCount/$total entries from client $idx → ${file.absolutePath}")
+            } catch (e: Exception) {
+                Log.e(TAG, "log-drain write failed for client $idx: ${e.message}", e)
             }
         }
     }
@@ -528,17 +655,18 @@ class BridgeService : Service() {
         return null
     }
 
-    // ─── 20Hz state broadcast loop ───
+    // ─── 100Hz state broadcast loop (parity with Electron stateHz=100) ───
 
     private fun startStateBroadcastLoop() {
         serviceScope.launch {
             while (isActive) {
-                delay(50)  // 20Hz
+                delay(10)  // 100Hz — matches Electron at src/bridge.ts:781
+                // BridgeState.toJson includes anchorTime + ts (set in
+                // getCurrentState via System.currentTimeMillis). Don't
+                // duplicate ts in extra — would override toJson's value.
                 val state = getCurrentState()
                 val jmxBeat = getJmxBeat()
-                val extra = mutableMapOf<String, Any?>(
-                    "ts" to System.currentTimeMillis()
-                )
+                val extra = mutableMapOf<String, Any?>()
                 if (jmxBeat != null) extra["jmxBeat"] = jmxBeat
                 measuredOutputLatency?.let { extra["measuredOutputLatency"] = it }
                 extra["latencyMethod"] = latencyMethod ?: "none"
@@ -628,7 +756,7 @@ class BridgeService : Service() {
         }
         Log.i(TAG, "Multicast lock acquired")
 
-        // Wake lock — keep CPU alive for 20Hz loop
+        // Wake lock — keep CPU alive for 100Hz state broadcast loop
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         wakeLock = powerManager.newWakeLock(
             PowerManager.PARTIAL_WAKE_LOCK,

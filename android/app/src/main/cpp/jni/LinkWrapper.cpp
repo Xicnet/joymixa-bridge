@@ -157,6 +157,62 @@ Java_com_xicnet_joymixabridge_LinkSession_nativeRequestBeatAtStartPlayingTime(
     h->link.commitAppSessionState(state);
 }
 
+// ─── Atomic state snapshot — single captureAppSessionState() call. ───
+//
+// Mirrors Electron's getState(quantum) (joymixa-bridge fork commit
+// "getState: include timeAtBeat for atomic anchor snapshot"). All five
+// returned fields are derived from the SAME state object so the
+// (beat, anchorTime) pair never phase-skews across a mesh tempo change.
+//
+// Returns: double[5] = [tempo, beat, phase, isPlaying ? 1 : 0, timeAtBeat (s)]
+JNIEXPORT jdoubleArray JNICALL
+Java_com_xicnet_joymixabridge_LinkSession_nativeGetState(
+        JNIEnv* env, jobject, jlong handle, jdouble quantum) {
+    auto* h = reinterpret_cast<LinkHandle*>(handle);
+    if (!h) return nullptr;
+    // ONE snapshot — every field below derives from THIS object.
+    auto state = h->link.captureAppSessionState();
+    auto hostTime = h->link.clock().micros();
+    double tempo = state.tempo();
+    double beat = state.beatAtTime(hostTime, quantum);
+    double phase = state.phaseAtTime(hostTime, quantum);
+    bool isPlaying = state.isPlaying();
+    auto timeAtBeatMicros = state.timeAtBeat(beat, quantum);
+    double timeAtBeat = std::chrono::duration<double>(timeAtBeatMicros).count();
+
+    jdoubleArray result = env->NewDoubleArray(5);
+    if (!result) return nullptr;
+    jdouble fill[5] = { tempo, beat, phase, isPlaying ? 1.0 : 0.0, timeAtBeat };
+    env->SetDoubleArrayRegion(result, 0, 5, fill);
+    return result;
+}
+
+// timeAtBeat helper — separate snapshot, used for request-quantized-start
+// where Electron also makes a separate getTimeForBeat call.
+JNIEXPORT jdouble JNICALL
+Java_com_xicnet_joymixabridge_LinkSession_nativeTimeAtBeat(
+        JNIEnv*, jobject, jlong handle, jdouble beat, jdouble quantum) {
+    auto* h = reinterpret_cast<LinkHandle*>(handle);
+    if (!h) return 0.0;
+    auto state = h->link.captureAppSessionState();
+    auto micros = state.timeAtBeat(beat, quantum);
+    return std::chrono::duration<double>(micros).count();
+}
+
+// Mirrors Electron's link.setIsPlayingAndRequestBeatAtTime — used for
+// request-quantized-start parity. Atomic: one capture, mutate, commit.
+JNIEXPORT void JNICALL
+Java_com_xicnet_joymixabridge_LinkSession_nativeSetIsPlayingAndRequestBeatAtTime(
+        JNIEnv*, jobject, jlong handle, jboolean isPlaying, jlong timeMicros, jdouble beat, jdouble quantum) {
+    auto* h = reinterpret_cast<LinkHandle*>(handle);
+    if (!h) return;
+    auto state = h->link.captureAppSessionState();
+    auto micros = std::chrono::microseconds(timeMicros);
+    state.setIsPlaying(isPlaying, micros);
+    state.requestBeatAtTime(beat, micros, quantum);
+    h->link.commitAppSessionState(state);
+}
+
 JNIEXPORT void JNICALL
 Java_com_xicnet_joymixabridge_LinkSession_nativeForceBeatAtTime(
         JNIEnv*, jobject, jlong handle, jdouble beat, jlong time, jdouble quantum) {
