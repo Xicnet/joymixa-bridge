@@ -52,21 +52,6 @@ class BridgeService : Service() {
     private val clientsLock = Any()
     private val clientLoopBeats = mutableMapOf<WebSocket, Double>()
 
-    // [X02] Per-client index for on-demand log drain. Each connecting client
-    // gets the lowest free index; on drain, that client's ring buffer is
-    // written to <externalFilesDir>/joymixa-client-N.log. Indices ARE recycled
-    // on disconnect, matching Electron bridge semantics.
-    private val clientIndices = mutableMapOf<WebSocket, Int>()
-
-    /** Returns the lowest positive integer not currently held by any connected client. */
-    private fun allocateClientIndex(): Int {
-        synchronized(clientsLock) {
-            val inUse = clientIndices.values.toSet()
-            var i = 1
-            while (inUse.contains(i)) i++
-            return i
-        }
-    }
 
     // Locks
     private var multicastLock: WifiManager.MulticastLock? = null
@@ -424,18 +409,15 @@ class BridgeService : Service() {
         : WebSocketServer(address) {
 
         override fun onOpen(conn: WebSocket, handshake: ClientHandshake?) {
-            val clientIndex = allocateClientIndex()
             synchronized(clientsLock) {
                 clients.add(conn)
-                clientIndices[conn] = clientIndex
             }
-            Log.i(TAG, "Client $clientIndex connected. clients: ${synchronized(clientsLock) { clients.size }}")
+            Log.i(TAG, "Client connected. clients: ${synchronized(clientsLock) { clients.size }}")
 
             // Send hello with atomic state (anchorTime + ts inside BridgeState.toJson)
             val state = getCurrentState()
             val jmxBeat = getJmxBeat()
             val extra = mutableMapOf<String, Any?>()
-            extra["clientIndex"] = clientIndex
             if (jmxBeat != null) extra["jmxBeat"] = jmxBeat
             measuredOutputLatency?.let { extra["measuredOutputLatency"] = it }
             extra["latencyMethod"] = latencyMethod ?: "none"
@@ -446,13 +428,11 @@ class BridgeService : Service() {
         }
 
         override fun onClose(conn: WebSocket, code: Int, reason: String?, remote: Boolean) {
-            val idx: Int?
             synchronized(clientsLock) {
                 clients.remove(conn)
                 clientLoopBeats.remove(conn)
-                idx = clientIndices.remove(conn)
             }
-            Log.i(TAG, "Client ${idx ?: "?"} disconnected. clients: ${synchronized(clientsLock) { clients.size }}")
+            Log.i(TAG, "Client disconnected. clients: ${synchronized(clientsLock) { clients.size }}")
             notifyStateUpdate()
         }
 
@@ -500,17 +480,6 @@ class BridgeService : Service() {
                     clientLoopBeats[sender] = beat
                 }
             }
-            return
-        }
-
-        // [X02] On-demand log drain response from a client. Mirrors Electron's
-        // handler at src/bridge.ts:914. We OVERWRITE the per-client log file
-        // (no streaming append). File I/O moved to a worker — UI thread is
-        // never blocked.
-        if (type == "log-drain-response") {
-            val entries = msg.optJSONArray("entries") ?: return
-            val idx: Int = synchronized(clientsLock) { clientIndices[sender] ?: 0 }
-            handleLogDrainResponse(entries, idx)
             return
         }
 
@@ -570,76 +539,6 @@ class BridgeService : Service() {
             if (!beat.isNaN() && time >= 0 && !quantum.isNaN()) {
                 Log.i(TAG, "Client force-beat-at-time: $beat $time $quantum")
                 linkSession.forceBeatAtTime(beat, time, quantum)
-            }
-        }
-    }
-
-    // ─── X02 log-drain protocol (port of bridge.ts:836-928) ───
-
-    /**
-     * Broadcast a `log-drain` request to all connected clients. Each client
-     * responds with `log-drain-response` carrying its in-memory ring buffer;
-     * the response handler writes one file per client to the app's external
-     * files dir (ADB pull-able). On-demand only — never on a hot path.
-     */
-    fun requestLogDrain() {
-        val n = synchronized(clientsLock) { clients.size }
-        broadcast(JSONObject().put("type", "log-drain").toString())
-        Log.i(TAG, "log drain requested for $n client(s)")
-    }
-
-    /**
-     * Validate one entry from an untrusted log-drain-response. Mirrors
-     * isLogEntry() at src/bridge.ts:64.
-     */
-    private fun isLogEntry(e: JSONObject): Boolean {
-        val tsField = e.opt("ts")
-        return tsField is Number
-            && e.opt("channel") is String
-            && e.opt("level") is String
-            && e.opt("msg") is String
-    }
-
-    private fun handleLogDrainResponse(entries: org.json.JSONArray, idx: Int) {
-        // File I/O runs off the calling thread (BridgeWebSocketServer's
-        // selector thread is hot). Snapshot what we need, then dispatch.
-        val total = entries.length()
-        // Pre-format on caller thread? No — JSONArray access is cheap; do
-        // everything on the worker to keep the WS thread free.
-        serviceScope.launch(Dispatchers.IO) {
-            try {
-                val externalDir = applicationContext.getExternalFilesDir(null)
-                if (externalDir == null) {
-                    Log.w(TAG, "log-drain: getExternalFilesDir returned null; cannot write")
-                    return@launch
-                }
-                val file = java.io.File(externalDir, "joymixa-client-${idx}.log")
-                val sb = StringBuilder()
-                var validCount = 0
-                val isoFmt = java.text.SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", java.util.Locale.US)
-                isoFmt.timeZone = java.util.TimeZone.getTimeZone("UTC")
-                for (i in 0 until total) {
-                    val e = entries.optJSONObject(i) ?: continue
-                    if (!isLogEntry(e)) continue
-                    val ts = e.optDouble("ts", 0.0).toLong()
-                    val channel = e.optString("channel")
-                    val level = e.optString("level")
-                    val text = e.optString("msg")
-                    val bridgeRxTs = System.currentTimeMillis()
-                    val wsLagMs = bridgeRxTs - ts
-                    val isoStr = isoFmt.format(java.util.Date(ts))
-                    sb.append(isoStr)
-                        .append(" bridgeRxTs=").append(bridgeRxTs)
-                        .append(" wsLagMs=").append(wsLagMs)
-                        .append(" client=").append(idx)
-                        .append(" [").append(channel).append('/').append(level).append("] ")
-                        .append(text).append('\n')
-                    validCount++
-                }
-                file.writeText(sb.toString())  // overwrite, matches Electron writeFileSync
-                Log.i(TAG, "drained $validCount/$total entries from client $idx → ${file.absolutePath}")
-            } catch (e: Exception) {
-                Log.e(TAG, "log-drain write failed for client $idx: ${e.message}", e)
             }
         }
     }

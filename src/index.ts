@@ -148,13 +148,6 @@ function setupTray(): void {
     },
     { type: 'separator' },
     {
-      label: 'Drain Client Logs',
-      click: () => {
-        bridge?.requestLogDrain();
-      },
-    },
-    { type: 'separator' },
-    {
       label: 'Quit',
       click: () => {
         app.quit();

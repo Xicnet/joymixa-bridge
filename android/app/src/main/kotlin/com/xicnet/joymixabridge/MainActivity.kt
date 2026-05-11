@@ -83,13 +83,6 @@ class MainActivity : AppCompatActivity() {
                 startActivity(Intent(this, GameActivity::class.java))
             }
         }
-
-        // [X02] Drain client log buffers to <externalFilesDir>/joymixa-client-N.log
-        // — same on-demand semantics as Electron's tray menu item. ADB pull
-        // retrieves the file for diagnostic inspection.
-        binding.drainLogsButton.setOnClickListener {
-            bridgeService?.requestLogDrain()
-        }
     }
 
     override fun onResume() {
