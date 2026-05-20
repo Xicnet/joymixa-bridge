@@ -163,7 +163,8 @@ Don't preemptively edit — wait for CI signal.
 ## Workflow file
 
 `.github/workflows/build.yml` — matrix has `ubuntu-latest`, `macos-latest`,
-`windows-latest`. Triggers on `v*` tag push (full release with GitHub Release)
+`macos-15-intel` (see `docs/macos-build.md`), `windows-latest`. Triggers on `v*`
+tag push (full release with GitHub Release)
 or `workflow_dispatch` (manual, artifacts only, no Release). Re-run protocol:
 on workflow failure, fix the cause and re-run; do not bypass with
 `--no-frozen-lockfile` or `--no-verify`.

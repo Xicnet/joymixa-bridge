@@ -78,6 +78,7 @@ Implications for agents:
 
 - `docs/desktop.md` — Desktop build, architecture, dependencies, Linux sandbox fix
 - `docs/windows-build.md` — Windows build via GH Actions, decisions log, calibration follow-ups
+- `docs/macos-build.md` — macOS build via GH Actions: arm64 + Intel (x64) matrix, why dedicated Intel runner over cross-compile/universal, arch-clean addons, Aug-2027 Intel shelf life
 - `docs/android.md` — Android build, architecture, build variants
 - `docs/ios.md` — iOS build, architecture, build variants
 - `docs/game-bundle.md` — Game bundling: asset copy script, WebView overview
