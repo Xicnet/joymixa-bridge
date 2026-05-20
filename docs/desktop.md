@@ -25,13 +25,13 @@ sudo chown root:root node_modules/electron/dist/chrome-sandbox && sudo chmod 475
 
 If you update Electron, rebuild the native addon against the new Node headers:
 ```bash
-yarn rebuild          # runs electron-rebuild -f -w @ktamas77/abletonlink
+yarn rebuild          # runs electron-rebuild -f -w @xicnet/abletonlink
 ```
 
 ## Requirements
 
 - **Node.js** + **yarn**
-- **C++ toolchain** — needed to compile `@ktamas77/abletonlink` native addon
+- **C++ toolchain** — needed to compile `@xicnet/abletonlink` native addon
 - **Linux**: `libavahi-compat-libdnssd-dev` (mDNS/DNS-SD for Link peer discovery)
 - **macOS/Windows**: Bonjour SDK (usually pre-installed)
 - TypeScript ~4.5, ES6/CommonJS target
@@ -63,7 +63,7 @@ yarn rebuild          # runs electron-rebuild -f -w @ktamas77/abletonlink
 
 | Package | Purpose |
 |---------|---------|
-| `@ktamas77/abletonlink` | Native C++ addon wrapping Ableton Link SDK (forked at `Xicnet/ableton-link`) |
+| `@xicnet/abletonlink` | Native C++ addon wrapping Ableton Link SDK (forked at `Xicnet/ableton-link`) |
 | `ws` | WebSocket server |
 | `electron` | Desktop shell |
 | `electron-forge` | Build toolchain (webpack, makers for deb/rpm/zip/squirrel) |

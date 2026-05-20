@@ -16,7 +16,7 @@ export const mainConfig: Configuration = {
   // webpack breaks this by changing __dirname. Externalize it so
   // Electron's require() loads it directly from node_modules.
   externals: {
-    '@ktamas77/abletonlink': 'commonjs2 @ktamas77/abletonlink',
+    '@xicnet/abletonlink': 'commonjs2 @xicnet/abletonlink',
     'coreaudio-latency': 'commonjs2 coreaudio-latency',
   },
 };

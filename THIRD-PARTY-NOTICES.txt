@@ -1,0 +1,24 @@
+THIRD-PARTY NOTICES — Joymixa Bridge
+
+Joymixa Bridge is licensed GPL-2.0-or-later (see LICENSE). It links Ableton
+Link (GPLv2+) via the @xicnet/abletonlink native addon, so the distributed
+binary is GPLv2+.
+
+Components and their origins:
+
+1. Ableton Link — Copyright (c) Ableton AG. GPLv2+ (or commercial).
+   Distributed as part of the @xicnet/abletonlink native-addon dependency
+   (which vendors the full Link source). See Ableton's LICENSE.md /
+   GNU-GPL-v2.0.md within that dependency for the verbatim GPLv2+ terms and
+   the link-devs@ableton.com commercial-license contact.
+
+2. @xicnet/abletonlink (Ableton Link Node bindings) — GPL-2.0-or-later.
+   A fork of @ktamas77/abletonlink by Tamas Kalman (MIT bindings, credited in
+   that package's THIRD-PARTY-NOTICES.txt), combined with Ableton Link and
+   XicNET modifications. The combined work is GPLv2+.
+
+3. Electron, and other npm dependencies — see their respective licenses in
+   node_modules and the generated licenses manifest produced at package time.
+
+4. Joymixa Bridge application code — Copyright (c) 2026 XicNET.
+   Licensed GPL-2.0-or-later.

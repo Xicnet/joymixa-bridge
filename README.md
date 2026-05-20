@@ -46,7 +46,7 @@ Android and iOS also support a **bundle** variant that embeds a web app alongsid
 
 ### 1. Install dependencies
 
-The bridge depends on `@ktamas77/abletonlink`, a Node.js native addon wrapping the Ableton Link C++ SDK. We use a [patched fork](https://github.com/Xicnet/ableton-link) that fixes a cross-platform build bug in the upstream package (hardcoded `LINK_PLATFORM_MACOSX=1` global define breaks Linux/Windows builds). The C++ SDK is vendored in the fork (no submodules).
+The bridge depends on `@xicnet/abletonlink`, a Node.js native addon wrapping the Ableton Link C++ SDK. It is our GPLv2+ fork of [`@ktamas77/abletonlink`](https://github.com/ktamas77/ableton-link) (maintained at [`Xicnet/ableton-link`](https://github.com/Xicnet/ableton-link)) that fixes a cross-platform build bug in the upstream package (hardcoded `LINK_PLATFORM_MACOSX=1` global define breaks Linux/Windows builds). The C++ SDK is vendored in the fork (no submodules).
 
 ```bash
 yarn install
@@ -62,7 +62,7 @@ The native addon must be compiled against Electron's Node.js headers, not the sy
 yarn rebuild
 ```
 
-This runs `electron-rebuild -f -w @ktamas77/abletonlink`.
+This runs `electron-rebuild -f -w @xicnet/abletonlink`.
 
 ### 3. Fix Electron sandbox (Linux only)
 

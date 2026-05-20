@@ -667,13 +667,6 @@
     "@jridgewell/resolve-uri" "^3.1.0"
     "@jridgewell/sourcemap-codec" "^1.4.14"
 
-"@ktamas77/abletonlink@git+https://github.com/Xicnet/ableton-link.git#3bca7d077d862df314244001fabb600e65de7f86":
-  version "1.2.4"
-  resolved "git+https://github.com/Xicnet/ableton-link.git#3bca7d077d862df314244001fabb600e65de7f86"
-  dependencies:
-    bindings "^1.5.0"
-    node-addon-api "^8.0.0"
-
 "@leichtgewicht/ip-codec@^2.0.1":
   version "2.0.5"
   resolved "https://registry.yarnpkg.com/@leichtgewicht/ip-codec/-/ip-codec-2.0.5.tgz#4fc56c15c580b9adb7dc3c333a134e540b44bfb1"
@@ -1291,6 +1284,13 @@
   dependencies:
     "@webassemblyjs/ast" "1.14.1"
     "@xtuc/long" "4.2.2"
+
+"@xicnet/abletonlink@git+https://github.com/Xicnet/ableton-link.git#e6bf4563bb3d028e274fbb73d32465aae2b038e7":
+  version "1.2.5"
+  resolved "git+https://github.com/Xicnet/ableton-link.git#e6bf4563bb3d028e274fbb73d32465aae2b038e7"
+  dependencies:
+    bindings "^1.5.0"
+    node-addon-api "^8.0.0"
 
 "@xmldom/xmldom@^0.8.8":
   version "0.8.11"

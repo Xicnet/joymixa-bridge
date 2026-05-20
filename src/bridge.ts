@@ -1,4 +1,4 @@
-import { AbletonLink } from '@ktamas77/abletonlink';
+import { AbletonLink } from '@xicnet/abletonlink';
 import { WebSocketServer, WebSocket } from 'ws';
 import { EventEmitter } from 'events';
 import { execFile } from 'child_process';

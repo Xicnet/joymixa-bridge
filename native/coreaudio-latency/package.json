@@ -2,6 +2,7 @@
   "name": "coreaudio-latency",
   "version": "1.0.0",
   "private": true,
+  "license": "GPL-2.0-or-later",
   "description": "CoreAudio output latency query for macOS",
   "main": "build/Release/coreaudio_latency.node",
   "scripts": {

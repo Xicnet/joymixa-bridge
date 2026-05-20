@@ -15,6 +15,12 @@ import androidx.webkit.WebViewAssetLoader
 
 class GameActivity : AppCompatActivity() {
 
+    companion object {
+        // Backend host the bundle's WebView proxies /api/ and /media/ to.
+        // Override per build for staging vs. production deployments.
+        private const val BACKEND_ORIGIN = "https://joymixa.com"
+    }
+
     private lateinit var webView: WebView
 
     @SuppressLint("SetJavaScriptEnabled")
@@ -55,7 +61,7 @@ class GameActivity : AppCompatActivity() {
 
                 // Redirect /api/ and /media/ requests to the real backend
                 if (url.host == "appassets.androidplatform.net" && (path.startsWith("/api/") || path.startsWith("/media/"))) {
-                    val realUrl = "https://test.joymixa.com${url.path}${url.query?.let { "?$it" } ?: ""}"
+                    val realUrl = "$BACKEND_ORIGIN${url.path}${url.query?.let { "?$it" } ?: ""}"
                     Log.d("GameWebView", "Proxying: $url → $realUrl")
                     try {
                         val conn = java.net.URL(realUrl).openConnection() as java.net.HttpURLConnection

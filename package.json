@@ -1,7 +1,7 @@
 {
   "name": "joymixa-bridge",
   "productName": "Joymixa Bridge",
-  "version": "1.6.0",
+  "version": "1.6.1",
   "description": "Ableton Link bridge and Joymixa-to-Joymixa relay for LAN music sync",
   "main": ".webpack/main",
   "repository": {
@@ -15,14 +15,14 @@
     "make": "electron-forge make",
     "publish": "electron-forge publish",
     "lint": "eslint --ext .ts,.tsx .",
-    "rebuild": "electron-rebuild -f -w @ktamas77/abletonlink,coreaudio-latency,wasapi-latency"
+    "rebuild": "electron-rebuild -f -w @xicnet/abletonlink,coreaudio-latency,wasapi-latency"
   },
   "keywords": ["ableton-link", "music-sync", "webrtc", "electron", "midi"],
   "author": {
     "name": "XicNET",
     "email": "code@xicnet.com"
   },
-  "license": "MIT",
+  "license": "GPL-2.0-or-later",
   "devDependencies": {
     "@electron-forge/cli": "^7.11.1",
     "@electron-forge/maker-deb": "^7.11.1",
@@ -49,7 +49,7 @@
     "typescript": "~5.7.0"
   },
   "dependencies": {
-    "@ktamas77/abletonlink": "git+https://github.com/Xicnet/ableton-link.git#3bca7d077d862df314244001fabb600e65de7f86",
+    "@xicnet/abletonlink": "git+https://github.com/Xicnet/ableton-link.git#e6bf4563bb3d028e274fbb73d32465aae2b038e7",
     "coreaudio-latency": "file:native/coreaudio-latency",
     "wasapi-latency": "file:native/wasapi-latency",
     "electron-squirrel-startup": "^1.0.1",

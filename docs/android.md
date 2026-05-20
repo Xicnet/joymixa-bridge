@@ -69,7 +69,7 @@ Both variants share all bridge code. The `bundle` flavor:
 |---|---|
 | `bridge.ts` Bridge class | `BridgeService.kt` (Foreground Service) |
 | `index.ts` main process | `MainActivity.kt` + `BridgeService.kt` |
-| `@ktamas77/abletonlink` native addon | `LinkWrapper.cpp` JNI + Ableton Link C++ SDK |
+| `@xicnet/abletonlink` native addon | `LinkWrapper.cpp` JNI + Ableton Link C++ SDK |
 | `ws` WebSocket server | `org.java-websocket:Java-WebSocket:1.5.6` |
 | System tray icon | Foreground service persistent notification |
 

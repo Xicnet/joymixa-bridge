@@ -2,6 +2,7 @@
   "name": "wasapi-latency",
   "version": "1.0.0",
   "private": true,
+  "license": "GPL-2.0-or-later",
   "description": "WASAPI default render endpoint latency query for Windows",
   "main": "build/Release/wasapi_latency.node",
   "scripts": {
