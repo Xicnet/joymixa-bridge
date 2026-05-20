@@ -49,7 +49,7 @@
     "typescript": "~5.7.0"
   },
   "dependencies": {
-    "@xicnet/abletonlink": "git+https://github.com/Xicnet/ableton-link.git#e6bf4563bb3d028e274fbb73d32465aae2b038e7",
+    "@xicnet/abletonlink": "git+https://github.com/Xicnet/ableton-link.git#1e4daad2ee61cdb7595330d228758862d1466f05",
     "coreaudio-latency": "file:native/coreaudio-latency",
     "wasapi-latency": "file:native/wasapi-latency",
     "electron-squirrel-startup": "^1.0.1",
