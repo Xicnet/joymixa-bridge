@@ -1,9 +1,12 @@
 name: Build iOS
 
 on:
-  push:
-    paths:
-      - 'ios/**'
+  # iOS build is paused (incomplete; not needed yet). Manual-only for now.
+  # To re-enable automatic builds, uncomment the push trigger below.
+  workflow_dispatch:
+  # push:
+  #   paths:
+  #     - 'ios/**'
 
 jobs:
   build:
