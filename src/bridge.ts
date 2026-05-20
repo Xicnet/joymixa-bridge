@@ -636,9 +636,11 @@ export class Bridge extends EventEmitter {
       this.emit('peers', num);
     });
 
-    // WebSocket server — listen on all interfaces for LAN access
-    this.wss = new WebSocketServer({ host: '0.0.0.0', port: this.config.port });
-    this.log(`[bridge] WebSocket listening on ws://0.0.0.0:${this.config.port}`);
+    // WebSocket server — loopback only. The browser always connects over
+    // ws://127.0.0.1; HTTPS pages can't reach a LAN-IP ws:// (mixed content),
+    // so binding all interfaces would only expose the port, never serve a client.
+    this.wss = new WebSocketServer({ host: '127.0.0.1', port: this.config.port });
+    this.log(`[bridge] WebSocket listening on ws://127.0.0.1:${this.config.port}`);
 
     this.wss.on('connection', (ws: WebSocket) => {
       // Disable Nagle on this connection to eliminate TCP-level coalescing

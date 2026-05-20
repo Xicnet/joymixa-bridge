@@ -2,7 +2,6 @@ import './index.css';
 
 interface BridgeAPI {
   getState: () => Promise<any>;
-  getLocalIP: () => Promise<string>;
   getPort: () => Promise<number>;
   getLogs: () => Promise<string>;
   closeWindow: () => Promise<void>;
@@ -44,10 +43,9 @@ async function init(): Promise<void> {
   const state = await window.bridge.getState();
   updateUI(state);
 
-  // Show connection URL
-  const ip = await window.bridge.getLocalIP();
+  // Show connection URL — always loopback (the browser connects over 127.0.0.1).
   const port = await window.bridge.getPort();
-  $('ws-url').textContent = `ws://${ip}:${port}`;
+  $('ws-url').textContent = `ws://127.0.0.1:${port}`;
 
   // Copy Logs button
   const copyBtn = $('copy-logs-btn');

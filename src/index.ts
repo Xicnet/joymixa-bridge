@@ -1,5 +1,4 @@
 import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, dialog, shell } from 'electron';
-import * as os from 'os';
 import * as path from 'path';
 import { Bridge } from './bridge';
 
@@ -17,18 +16,6 @@ let bridge: Bridge | null = null;
 
 const APP_HOMEPAGE = 'https://joymixa.com';
 const APP_REPO = 'https://github.com/Xicnet/joymixa-bridge';
-
-function getLocalIP(): string {
-  const interfaces = os.networkInterfaces();
-  for (const name of Object.keys(interfaces)) {
-    for (const iface of interfaces[name] || []) {
-      if (iface.family === 'IPv4' && !iface.internal) {
-        return iface.address;
-      }
-    }
-  }
-  return '127.0.0.1';
-}
 
 function createTrayIcon(): Electron.NativeImage {
   // Try file-based PNG first (works reliably on Linux/i3bar)
@@ -165,10 +152,6 @@ function setupTray(): void {
 function setupIPC(): void {
   ipcMain.handle('get-state', () => {
     return bridge?.getState() ?? null;
-  });
-
-  ipcMain.handle('get-local-ip', () => {
-    return getLocalIP();
   });
 
   ipcMain.handle('get-port', () => {

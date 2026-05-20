@@ -2,7 +2,6 @@ import { contextBridge, ipcRenderer } from 'electron';
 
 contextBridge.exposeInMainWorld('bridge', {
   getState: () => ipcRenderer.invoke('get-state'),
-  getLocalIP: () => ipcRenderer.invoke('get-local-ip'),
   getPort: () => ipcRenderer.invoke('get-port'),
   getLogs: () => ipcRenderer.invoke('get-logs'),
   closeWindow: () => ipcRenderer.invoke('close-window'),
