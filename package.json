@@ -1,7 +1,7 @@
 {
   "name": "joymixa-bridge",
   "productName": "Joymixa Bridge",
-  "version": "1.6.1",
+  "version": "1.7.0",
   "description": "Ableton Link bridge and Joymixa-to-Joymixa relay for LAN music sync",
   "main": ".webpack/main",
   "repository": {
@@ -49,7 +49,7 @@
     "typescript": "~5.7.0"
   },
   "dependencies": {
-    "@xicnet/abletonlink": "git+https://github.com/Xicnet/ableton-link.git#4265b2103c8903e9cd8ce87b2e97955c4e63442e",
+    "@xicnet/abletonlink": "git+https://github.com/Xicnet/ableton-link.git#c171c4d93d87087e69275186a55202258bef4f9e",
     "coreaudio-latency": "file:native/coreaudio-latency",
     "wasapi-latency": "file:native/wasapi-latency",
     "electron-squirrel-startup": "^1.0.1",
