@@ -125,7 +125,9 @@ Broadcast when tempo changes (either from a Link peer or a client command).
   "tempo": 128.0,
   "beat": 12.34,
   "phase": 0.34,
-  "quantum": 4
+  "quantum": 4,
+  "ts": 1716998400000,
+  "anchorTime": 60807.849
 }
 ```
 
@@ -133,6 +135,13 @@ When triggered by a Link peer callback, `tempo` is rounded to 2 decimal places.
 
 When triggered by a client `set-tempo` command, `tempo` is the raw value read
 back from Link after setting (Link may quantize it).
+
+`ts` is the server timestamp (Unix epoch milliseconds) at broadcast time.
+`anchorTime` is `timeAtBeat` (Link-clock seconds) for the captured `beat`, giving
+clients a clock anchor to extrapolate `beatAtTime` rather than a bare bpm. Both
+`ts` and `anchorTime` are present on every `tempo` message — from the Link peer
+callback and from the `set-tempo` command path alike — captured in the same
+atomic `getState()` snapshot as `beat` and `phase`.
 
 > **Note:** The `beat` and `phase` fields in `tempo` messages are captured
 > at callback delivery time, not at the exact moment Link changed tempo.
@@ -182,13 +191,21 @@ Broadcast to all clients **except** the original sender.
 Set the Link session tempo.
 
 ```json
-{ "type": "set-tempo", "tempo": 128.0 }
+{ "type": "set-tempo", "tempo": 128.0, "atTime": 60807.849 }
 ```
 
-**Validation:** `tempo` must be a finite number > 0. Invalid values are silently ignored.
+- `tempo`: BPM (> 0).
+- `atTime` (optional): `hostTimeAtOutput` in Link-clock seconds (the bridge's
+  `getCurrentTime()` / `clock().micros()/1e6` domain) at which the tempo change
+  takes effect, shared across peers. Omitted ⇒ applied at the bridge's
+  receive-time. Older bridges ignore the field (apply at receive-time).
+
+**Validation:** `tempo` must be a finite number > 0. Invalid values are silently
+ignored. `atTime` is applied only when it is a finite number > 0; otherwise the
+change applies at receive-time.
 
 **Side effect:** Bridge reads back the tempo from Link after setting and broadcasts
-a `tempo` message to all clients (see 3.3).
+a `tempo` message to all OTHER clients (carrying `ts` + `anchorTime`, see 3.3).
 
 ### 4.2 `play`
 
@@ -348,7 +365,7 @@ before sending.
 |-----------|-----------------------------|---------------------------------------------|
 | `hello`   | On connect (once)           | Full state + `numClients` + optional `jmxBeat` |
 | `state`   | Every 1/stateHz seconds     | Full state + `ts` + optional `jmxBeat`      |
-| `tempo`   | Tempo changes               | `tempo`, `beat`, `phase`, `quantum`         |
+| `tempo`   | Tempo changes               | `tempo`, `beat`, `phase`, `quantum`, `ts`, `anchorTime` |
 | `playing` | Transport state changes     | `isPlaying`                                 |
 | `peers`   | Link peer count changes     | `numPeers`                                  |
 | `relay`   | Client sent a relay message | `payload` (arbitrary object)                |
@@ -357,7 +374,7 @@ before sending.
 
 | Type                      | Effect                                     | Required Fields          |
 |---------------------------|--------------------------------------------|--------------------------|
-| `set-tempo`               | Change Link tempo                          | `tempo` (float > 0)      |
+| `set-tempo`               | Change Link tempo                          | `tempo` (float > 0), optional `atTime` |
 | `play`                    | Start transport                            | (none)                   |
 | `stop`                    | Stop transport                             | (none)                   |
 | `request-quantized-start` | Start aligned to bar boundary              | optional `quantum`       |

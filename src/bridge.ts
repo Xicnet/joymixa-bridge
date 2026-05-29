@@ -843,10 +843,19 @@ export class Bridge extends EventEmitter {
     if (!this.link) return;
 
     if (msg.type === 'set-tempo' && typeof msg.tempo === 'number' && isFinite(msg.tempo) && msg.tempo > 0) {
-      this.log(`[Bridge:cmd] set-tempo tempo=${msg.tempo.toFixed(2)}`);
-      this.link.setTempo(msg.tempo);
-      const { tempo, beat, phase } = this.link.getState(this.config.quantum);
-      this.broadcastExcept(sender, { type: 'tempo', tempo, beat, phase, quantum: this.config.quantum });
+      if (typeof msg.atTime === 'number' && isFinite(msg.atTime) && msg.atTime > 0) {
+        this.log(`[Bridge:cmd] set-tempo tempo=${msg.tempo.toFixed(2)} atTime=${msg.atTime.toFixed(6)}`);
+        this.link.setTempo(msg.tempo, msg.atTime);   // shared hostTimeAtOutput (Link clock seconds)
+      } else {
+        this.log(`[Bridge:cmd] set-tempo tempo=${msg.tempo.toFixed(2)} (no atTime, apply now)`);
+        this.link.setTempo(msg.tempo);               // back-compat: apply at receive-now
+      }
+      // Mirror the callback path: include ts + anchorTime (timeAtBeat) so the OTHER
+      // peer receives a proper clock anchor, not a bare bpm. (Previously this
+      // command-path broadcast omitted them.)
+      const { tempo, beat, phase, timeAtBeat: anchorTime } = this.link.getState(this.config.quantum);
+      const ts = Date.now();
+      this.broadcastExcept(sender, { type: 'tempo', tempo, beat, phase, quantum: this.config.quantum, ts, anchorTime });
     }
 
     if (msg.type === 'play') {
