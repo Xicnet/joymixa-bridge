@@ -138,6 +138,20 @@ Java_com_xicnet_joymixabridge_LinkSession_nativeSetTempo(JNIEnv*, jobject, jlong
     h->link.commitAppSessionState(state);
 }
 
+// atTimeSeconds: shared hostTimeAtOutput in SECONDS (Link clock domain, i.e.
+// clock().micros()/1e6). The tempo change takes effect at that instant so all
+// peers apply it together. Mirrors the Electron binding (abletonlink.cc SetTempo).
+JNIEXPORT void JNICALL
+Java_com_xicnet_joymixabridge_LinkSession_nativeSetTempoAtTime(
+        JNIEnv*, jobject, jlong handle, jdouble bpm, jdouble atTimeSeconds) {
+    auto* h = reinterpret_cast<LinkHandle*>(handle);
+    if (!h) return;
+    auto state = h->link.captureAppSessionState();
+    auto atTime = std::chrono::microseconds(static_cast<long long>(atTimeSeconds * 1000000.0));
+    state.setTempo(bpm, atTime);
+    h->link.commitAppSessionState(state);
+}
+
 JNIEXPORT void JNICALL
 Java_com_xicnet_joymixabridge_LinkSession_nativeSetIsPlaying(JNIEnv*, jobject, jlong handle, jboolean playing) {
     auto* h = reinterpret_cast<LinkHandle*>(handle);

@@ -399,10 +399,14 @@ class BridgeService : Service() {
     // ─── WebSocket Server ───
 
     private fun startWebSocketServer() {
-        wsServer = BridgeWebSocketServer(InetSocketAddress("0.0.0.0", WS_PORT))
+        // Bundle variant: the WebView connects over ws://127.0.0.1, so bind loopback
+        // only (matches Electron — HTTPS pages can't reach a LAN-IP ws://). Bridge-only
+        // variant serves a browser on another device, so it must bind all interfaces.
+        val bindHost = if (BuildConfig.INCLUDE_GAME) "127.0.0.1" else "0.0.0.0"
+        wsServer = BridgeWebSocketServer(InetSocketAddress(bindHost, WS_PORT))
         wsServer!!.isReuseAddr = true
         wsServer!!.start()
-        Log.i(TAG, "WS server started on port $WS_PORT")
+        Log.i(TAG, "WS server started on $bindHost:$WS_PORT")
     }
 
     private inner class BridgeWebSocketServer(address: InetSocketAddress)
@@ -487,8 +491,16 @@ class BridgeService : Service() {
         if (type == "set-tempo") {
             val tempo = msg.optDouble("tempo", Double.NaN)
             if (tempo.isNaN() || !tempo.isFinite() || tempo <= 0) return
-            Log.i(TAG, "Client set-tempo: $tempo")
-            linkSession.setTempo(tempo)
+            // Optional atTime: shared hostTimeAtOutput (Link-clock seconds) so all
+            // peers apply together. Absent => apply-now. Mirrors src/bridge.ts set-tempo.
+            val atTime = msg.optDouble("atTime", Double.NaN)
+            if (!atTime.isNaN() && atTime.isFinite() && atTime > 0) {
+                Log.i(TAG, "Client set-tempo: $tempo atTime=$atTime")
+                linkSession.setTempo(tempo, atTime)
+            } else {
+                Log.i(TAG, "Client set-tempo: $tempo (no atTime, apply now)")
+                linkSession.setTempo(tempo)
+            }
             // Atomic readback — same pattern as Electron's set-tempo handler
             // (src/bridge.ts:933): one captureAppSessionState() call, all
             // fields from the same snapshot.

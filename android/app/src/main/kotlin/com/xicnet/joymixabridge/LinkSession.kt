@@ -77,6 +77,15 @@ class LinkSession {
         if (handle != 0L) nativeSetTempo(handle, bpm)
     }
 
+    /**
+     * setTempo at a shared apply instant. atTimeSeconds is hostTimeAtOutput in
+     * Link-clock seconds (clock().micros()/1e6) so all peers apply together.
+     * Mirrors Electron's link.setTempo(bpm, atTimeSeconds).
+     */
+    fun setTempo(bpm: Double, atTimeSeconds: Double) {
+        if (handle != 0L) nativeSetTempoAtTime(handle, bpm, atTimeSeconds)
+    }
+
     fun setIsPlaying(playing: Boolean) {
         if (handle != 0L) nativeSetIsPlaying(handle, playing)
     }
@@ -136,6 +145,7 @@ class LinkSession {
     private external fun nativeIsPlaying(handle: Long): Boolean
     private external fun nativeGetNumPeers(handle: Long): Int
     private external fun nativeSetTempo(handle: Long, bpm: Double)
+    private external fun nativeSetTempoAtTime(handle: Long, bpm: Double, atTimeSeconds: Double)
     private external fun nativeSetIsPlaying(handle: Long, playing: Boolean)
     private external fun nativeRequestBeatAtStartPlayingTime(handle: Long, beat: Double, quantum: Double)
     private external fun nativeForceBeatAtTime(handle: Long, beat: Double, time: Long, quantum: Double)
