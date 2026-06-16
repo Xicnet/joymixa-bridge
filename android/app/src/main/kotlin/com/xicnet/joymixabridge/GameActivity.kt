@@ -12,6 +12,8 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.appcompat.app.AppCompatActivity
 import androidx.webkit.WebViewAssetLoader
+import androidx.webkit.WebViewCompat
+import androidx.webkit.WebViewFeature
 
 class GameActivity : AppCompatActivity() {
 
@@ -19,6 +21,15 @@ class GameActivity : AppCompatActivity() {
         // Backend host the bundle's WebView proxies /api/ and /media/ to.
         // Override per build for staging vs. production deployments.
         private const val BACKEND_ORIGIN = "https://joymixa.com"
+
+        // Origin the WebView serves the game from (WebViewAssetLoader virtual host).
+        private const val ASSET_ORIGIN = "https://appassets.androidplatform.net"
+
+        // Injected into the page BEFORE any app script runs. Tells the web app it is
+        // running inside the native bundle (in-process bridge) so it ungates the
+        // Joymixa Bridge toggle without the companion-app download/install UI.
+        // PlatformService reads `window.__jmNative === true` once at construction.
+        private const val NATIVE_SHELL_INIT_JS = "window.__jmNative = true;"
     }
 
     private lateinit var webView: WebView
@@ -110,6 +121,27 @@ class GameActivity : AppCompatActivity() {
             ) {
                 Log.e("GameWebView", "Error ($errorCode): $description @ $failingUrl")
             }
+
+            // Fallback native-shell flag injection for WebView providers too old to
+            // support DOCUMENT_START_SCRIPT (see the addDocumentStartJavaScript call
+            // below, which is the primary, race-free path). onPageStarted runs before
+            // the page's own scripts on every modern WebView; on a stale provider it
+            // can race, but this only matters when the feature check failed entirely.
+            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                super.onPageStarted(view, url, favicon)
+                if (!WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+                    view?.evaluateJavascript(NATIVE_SHELL_INIT_JS, null)
+                }
+            }
+        }
+
+        // Primary, race-free injection: guaranteed to run before any page script, so
+        // PlatformService sees window.__jmNative on first construction. Requires the
+        // DOCUMENT_START_SCRIPT WebView feature; falls back to onPageStarted above.
+        if (WebViewFeature.isFeatureSupported(WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            WebViewCompat.addDocumentStartJavaScript(
+                webView, NATIVE_SHELL_INIT_JS, setOf(ASSET_ORIGIN)
+            )
         }
 
         webView.addJavascriptInterface(LogRelayBridge(), "JoymixaBridge")
