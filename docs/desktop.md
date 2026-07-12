@@ -34,7 +34,7 @@ yarn rebuild          # runs electron-rebuild -f -w @xicnet/abletonlink
 - **C++ toolchain** — needed to compile `@xicnet/abletonlink` native addon
 - **Linux**: `libavahi-compat-libdnssd-dev` (mDNS/DNS-SD for Link peer discovery)
 - **macOS/Windows**: Bonjour SDK (usually pre-installed)
-- TypeScript ~4.5, ES6/CommonJS target
+- TypeScript ~5.7, ES6/CommonJS target
 
 ## Architecture
 
@@ -46,7 +46,7 @@ yarn rebuild          # runs electron-rebuild -f -w @xicnet/abletonlink
 │  └─ Bridge instance                      │
 │     ├─ Ableton Link session              │
 │     ├─ WebSocket server (:20809)         │
-│     └─ 20Hz state broadcast loop         │
+│     └─ 100Hz state broadcast loop        │
 └──────────────────────────────────────────┘
 ```
 
@@ -55,7 +55,7 @@ yarn rebuild          # runs electron-rebuild -f -w @xicnet/abletonlink
 | File | Role |
 |------|------|
 | `src/index.ts` | Electron main process: tray icon, status window, IPC, app lifecycle |
-| `src/bridge.ts` | `Bridge` class: Ableton Link session + WS server + 20Hz broadcast + client commands |
+| `src/bridge.ts` | `Bridge` class: Ableton Link session + WS server + 100Hz broadcast + client commands |
 | `src/renderer.ts` | Status window renderer (receives state via IPC) |
 | `src/preload.ts` | Preload script for renderer context bridge |
 
@@ -71,7 +71,7 @@ yarn rebuild          # runs electron-rebuild -f -w @xicnet/abletonlink
 ## Protocol
 
 Implements the WebSocket protocol documented in [docs/protocol.md](protocol.md).
-Port 20809, JSON messages, 20Hz broadcast rate.
+Port 20809 (bound to `127.0.0.1`, loopback only), JSON messages, 100Hz broadcast rate.
 
 ## Build outputs
 
