@@ -142,9 +142,47 @@ When investigating bugs:
 ## Git
 
 - **Commit messages must reflect actual changes.** Read the diff before writing the message; don't copy language from task files or specs that contradicts what was actually done.
-- **Commit-message style: plain, sentence-form** (not Conventional Commits). Example: `windows: WASAPI latency NAPI addon`. See `git log --oneline` for style.
 - **Never `--no-verify` or skip hooks** unless explicitly requested.
 - **Wait for explicit approval before committing.** Don't auto-commit on a successful build — the maintainer tests first.
+
+### Commit-message style: Conventional Commits
+
+Adopted 2026-07-12. This repo is **public** and its history is part of what people see; it also has a
+`CHANGELOG.md` and a `scripts/release.sh`, so a machine-readable log is worth having.
+
+Format: `type(scope): subject` — imperative mood, lowercase subject, no trailing period.
+
+**`type` is a closed set. Do not invent new ones:**
+
+| type | use for |
+|------|---------|
+| `feat` | a new user-visible capability |
+| `fix` | a defect corrected (including compliance/legal defects, not just crashes) |
+| `perf` | a change made for performance |
+| `refactor` | behavior-preserving restructure |
+| `docs` | documentation only |
+| `test` | tests only |
+| `build` | build system, packaging, dependencies |
+| `ci` | CI configuration |
+| `chore` | anything else (releases, housekeeping) |
+
+`scope` is optional and names the affected component — e.g. `bridge`, `android`, `ios`, `windows`,
+`macos`, `ws`, `link`, `license`. **A scope is not a type:** write `fix(bridge): …`, never `bridge: …`.
+
+Breaking changes — especially to the **WebSocket protocol**, which a separate frontend consumes — take
+`!` before the colon and a `BREAKING CHANGE:` footer explaining the migration:
+
+```
+feat(ws)!: rename the tempo payload's anchorTime field
+
+BREAKING CHANGE: clients reading `anchorTime` must now read `anchorAt`.
+```
+
+Body: explain **why**, and what the failure mode was — not just what changed. The diff already says what.
+
+**History note.** Commits before 2026-07-12 are inconsistent: roughly half are plain sentences, ~30 use a
+bare `component:` prefix (`bridge:`, `windows:`), and only a handful were genuinely Conventional. Don't
+imitate the old log — follow the table above. Don't rewrite the old history either; it's published.
 
 ## Key constraints
 
