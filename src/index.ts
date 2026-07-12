@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, dialog, shell, clipboard } from 'electron';
+import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, dialog, shell, clipboard, Notification } from 'electron';
 import * as path from 'path';
 import { Bridge } from './bridge';
 
@@ -188,6 +188,44 @@ function setupTray(): void {
   });
 }
 
+/**
+ * Peer join/leave notifications — Ableton's Link UI guidelines call these mandatory.
+ *
+ * Link's callback reports the new *count*, never an identity or a delta, so a join and a
+ * leave are only distinguishable by comparing against the previous count. The baseline is
+ * seeded once from the count at startup (see the 'started' handler): peers already on the
+ * mesh when we join are the session we walked into, not arrivals, and must not notify.
+ * Seeding it there rather than on the first callback matters — starting alone and then
+ * having someone join produces a first callback of 1, which IS a real join.
+ *
+ * A single callback can move the count by more than one (a peer with several Link-enabled
+ * apps quits), so phrase the message from the delta rather than assuming ±1.
+ */
+let lastPeerCount: number | null = null;
+
+function notifyPeerChange(numPeers: number): void {
+  const previous = lastPeerCount;
+  lastPeerCount = numPeers;
+
+  if (previous === null || numPeers === previous) return;
+  if (!Notification.isSupported()) return;
+
+  const delta = numPeers - previous;
+  const count = Math.abs(delta);
+  const noun = count === 1 ? 'peer' : 'peers';
+
+  let body: string;
+  if (delta > 0) {
+    body = `${count} Link ${noun} joined — ${numPeers} now in the session.`;
+  } else if (numPeers === 0) {
+    body = `${count} Link ${noun} left — no peers in the session.`;
+  } else {
+    body = `${count} Link ${noun} left — ${numPeers} still in the session.`;
+  }
+
+  new Notification({ title: 'Joymixa Bridge', body, silent: true }).show();
+}
+
 function setupIPC(): void {
   ipcMain.handle('get-state', () => {
     return bridge?.getState() ?? null;
@@ -225,7 +263,17 @@ function showFatalError(reason: string, message: string): void {
 function startBridge(): void {
   bridge = new Bridge();
 
-  bridge.on('peers', () => notifyRenderer());
+  // Baseline the peer count once Link is up, so the peers already on the mesh don't
+  // arrive as a burst of "joined" notifications the moment we connect.
+  bridge.on('started', () => {
+    lastPeerCount = bridge?.getState()?.numPeers ?? 0;
+    notifyRenderer();
+  });
+
+  bridge.on('peers', (numPeers: number) => {
+    notifyPeerChange(numPeers);
+    notifyRenderer();
+  });
   bridge.on('tempo', () => notifyRenderer());
   bridge.on('playing', () => notifyRenderer());
   bridge.on('clients', () => notifyRenderer());
