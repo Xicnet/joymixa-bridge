@@ -169,6 +169,26 @@ function setupIPC(): void {
   });
 }
 
+const FATAL_ADVICE: Record<string, string> = {
+  'port-in-use': 'Another copy of Joymixa Bridge — or another app — is already using it. Quit the other one and start the Bridge again.',
+  'link-unavailable': 'This build of Joymixa Bridge is missing its Ableton Link component, or it does not match your system. Reinstalling the app should fix it.',
+  'link-failed': "Joymixa Bridge can't reach Ableton Link, so it can't sync. Restarting the app may help.",
+};
+
+function showFatalError(reason: string, message: string): void {
+  const advice = FATAL_ADVICE[reason] ?? FATAL_ADVICE['link-failed'];
+  const detail = `${message}\n\n${advice}`;
+
+  dialog.showMessageBoxSync({
+    type: 'error',
+    title: 'Joymixa Bridge',
+    message: 'Joymixa Bridge could not start.',
+    detail,
+    buttons: ['Quit'],
+  });
+  app.quit();
+}
+
 function startBridge(): void {
   bridge = new Bridge();
 
@@ -182,7 +202,16 @@ function startBridge(): void {
     }
   });
 
-  bridge.start();
+  // Without this the app sits in the tray looking healthy with a dead bridge:
+  // Link failures reject start()'s promise (which nothing awaited), and a
+  // port collision surfaces asynchronously long after start() has returned.
+  bridge.on('fatal', ({ reason, message }: { reason: string; message: string }) => {
+    showFatalError(reason, message);
+  });
+
+  bridge.start().catch((e: unknown) => {
+    showFatalError('link-failed', e instanceof Error ? e.message : String(e));
+  });
 }
 
 function notifyRenderer(): void {
@@ -196,14 +225,25 @@ if (process.platform === 'darwin') {
   app.dock?.hide();
 }
 
-app.on('ready', () => {
-  setupIPC();
-  setupTray();
-  startBridge();
+// Only one Bridge may run: a second instance would race the first for port 20809
+// and put a duplicate peer on the Link mesh. Hand focus back to the running copy.
+// "Open at Login" makes an accidental double-launch easy, so this is not theoretical.
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    createStatusWindow();
+  });
 
-  // Show status window on first launch
-  createStatusWindow();
-});
+  app.on('ready', () => {
+    setupIPC();
+    setupTray();
+    startBridge();
+
+    // Show status window on first launch
+    createStatusWindow();
+  });
+}
 
 app.on('window-all-closed', () => {
   // Don't quit — tray app stays running

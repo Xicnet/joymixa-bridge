@@ -1,4 +1,4 @@
-import { AbletonLink } from '@xicnet/abletonlink';
+import type { AbletonLink } from '@xicnet/abletonlink';
 import { WebSocketServer, WebSocket } from 'ws';
 import { EventEmitter } from 'events';
 import { execFile } from 'child_process';
@@ -6,6 +6,23 @@ import { readFile, readdir } from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 import { createWriteStream, WriteStream } from 'fs';
+
+// Ableton Link native addon. Loaded via a guarded require, not a static import:
+// @xicnet/abletonlink calls bindings() at module top-level, so a missing, corrupt,
+// or wrong-arch .node throws during import — before app 'ready', before Bridge
+// exists — and Electron shows a raw crash dump instead of an explicable error.
+// Deferring the failure to start() lets it surface as the same 'fatal' dialog as
+// every other startup failure. Mirrors the coreaudio/wasapi load pattern below.
+type AbletonLinkCtor = new (bpm: number) => AbletonLink;
+let abletonLinkAddon: AbletonLinkCtor | null = null;
+let abletonLinkLoadError: string | null = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  abletonLinkAddon = (require('@xicnet/abletonlink') as { AbletonLink: AbletonLinkCtor }).AbletonLink;
+} catch (e) {
+  abletonLinkLoadError = (e as Error).message;
+  console.error('[Bridge] Ableton Link native addon failed to load:', abletonLinkLoadError);
+}
 
 // CoreAudio native addon (macOS only) — returns null on other platforms
 interface CoreAudioResult {
@@ -79,6 +96,7 @@ export class Bridge extends EventEmitter {
   private stateInterval: ReturnType<typeof setInterval> | null = null;
   private lastLoggedStateTempo: number | null = null;
   private running = false;
+  private stopped = false;
   // Phase-alignment diagnostics — set false before release builds.
   private diagLog = true;
 
@@ -579,10 +597,30 @@ export class Bridge extends EventEmitter {
     if (this.running) return;
     this.running = true;
 
-    // Ableton Link
-    this.link = new AbletonLink(this.config.defaultBpm);
-    this.link.enable(true);
-    this.link.enableStartStopSync(true);
+    // Ableton Link. Two distinct failures, both of which used to leave the tray
+    // icon up over a dead bridge: the addon never loaded (see the guarded require
+    // above), or the native session refused to start. start() is invoked
+    // fire-and-forget from the app 'ready' handler, so surface them rather than
+    // rejecting into the void.
+    if (!abletonLinkAddon) {
+      this.running = false;
+      const msg = `Ableton Link native module could not be loaded: ${abletonLinkLoadError ?? 'unknown error'}`;
+      this.warn(`[bridge] ${msg}`);
+      this.emit('fatal', { reason: 'link-unavailable', message: msg });
+      return;
+    }
+
+    try {
+      this.link = new abletonLinkAddon(this.config.defaultBpm);
+      this.link.enable(true);
+      this.link.enableStartStopSync(true);
+    } catch (e) {
+      this.running = false;
+      const msg = e instanceof Error ? e.message : String(e);
+      this.warn(`[bridge] Ableton Link failed to start: ${msg}`);
+      this.emit('fatal', { reason: 'link-failed', message: msg });
+      return;
+    }
 
     this.log(`[bridge] Link enabled. peers: ${this.link.getNumPeers()}`);
 
@@ -640,6 +678,18 @@ export class Bridge extends EventEmitter {
     // ws://127.0.0.1; HTTPS pages can't reach a LAN-IP ws:// (mixed content),
     // so binding all interfaces would only expose the port, never serve a client.
     this.wss = new WebSocketServer({ host: '127.0.0.1', port: this.config.port });
+
+    // A listen failure (EADDRINUSE when a second instance or another app holds
+    // the port) arrives as an async 'error' event, not a constructor throw. With
+    // no listener, EventEmitter rethrows it as an uncaught exception.
+    this.wss.on('error', (e: NodeJS.ErrnoException) => {
+      const inUse = e.code === 'EADDRINUSE';
+      this.warn(`[bridge] WebSocket server error: ${e.code ?? ''} ${e.message}`);
+      if (!inUse) return;
+      this.running = false;
+      this.emit('fatal', { reason: 'port-in-use', message: `Port ${this.config.port} is already in use.`, port: this.config.port });
+    });
+
     this.log(`[bridge] WebSocket listening on ws://127.0.0.1:${this.config.port}`);
 
     this.wss.on('connection', (ws: WebSocket) => {
@@ -735,7 +785,11 @@ export class Bridge extends EventEmitter {
   }
 
   stop(): void {
-    if (!this.running) return;
+    // Not gated on `running`: a fatal start failure clears the flag while leaving
+    // a half-open server and live timers behind, and those still need releasing.
+    // `stopped` guards the tail so a repeat call can't re-emit or re-end the log.
+    if (this.stopped) return;
+    this.stopped = true;
     this.running = false;
 
     if (this.stateInterval) {
@@ -754,6 +808,7 @@ export class Bridge extends EventEmitter {
       }
       this.clients.clear();
       this.clientLoopBeats.clear();
+      this.wss.removeAllListeners();
       this.wss.close();
       this.wss = null;
     }
