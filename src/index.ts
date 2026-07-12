@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, dialog, shell, clipboard, Notification } from 'electron';
+import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, dialog, shell, clipboard, Notification, screen } from 'electron';
 import * as path from 'path';
 import { Bridge } from './bridge';
 import type { BeatTick } from './ipc-types';
@@ -36,16 +36,74 @@ function createTrayIcon(): Electron.NativeImage {
   return nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`);
 }
 
+const PANEL_WIDTH = 360;
+/** Sized to the content. The old 480 left a large dead area once the beat LEDs, the Copy
+ *  Logs button and the ws:// URL were removed from the panel. */
+const PANEL_HEIGHT = 320;
+/** Gap between the panel and the screen edge / tray icon. */
+const PANEL_MARGIN = 8;
+
+/**
+ * Position the panel against the tray icon, the way a menu-bar app behaves — rather than
+ * letting it appear wherever the window manager feels like putting it.
+ *
+ * Platform split, and it is forced rather than chosen: `tray.getBounds()` is documented
+ * `@platform darwin,win32` (electron.d.ts), so on Linux there is no way to ask where the
+ * tray icon actually is. The fallback is the cursor: the panel is only ever opened by
+ * clicking the tray icon, so the pointer is on it. That is an approximation, but a far
+ * better one than the previous behaviour, which was no positioning at all.
+ *
+ * (`screen.getCursorScreenPoint()` and `win.setPosition()` carry no platform restriction,
+ * so both halves work everywhere. Note the `menubar` package is NOT an option here — its
+ * peer dependency caps at Electron <35 and we run 40.)
+ *
+ * Everything is clamped to the display's *work area*, not its full bounds, so the panel
+ * cannot land under a taskbar/dock or off the edge of the screen.
+ */
+function positionPanelNearTray(win: BrowserWindow): void {
+  const anchor = trayAnchorPoint();
+  const display = screen.getDisplayNearestPoint(anchor);
+  const area = display.workArea;
+
+  // Centre horizontally on the anchor, then clamp inside the work area.
+  let x = Math.round(anchor.x - PANEL_WIDTH / 2);
+  x = Math.min(Math.max(x, area.x + PANEL_MARGIN), area.x + area.width - PANEL_WIDTH - PANEL_MARGIN);
+
+  // Below the anchor if the tray sits at the top of the screen (macOS menu bar, top panel);
+  // above it if the tray sits at the bottom (Windows taskbar, most Linux docks). Decide from
+  // where the anchor actually is, rather than assuming per-platform.
+  const anchorIsNearTop = anchor.y < area.y + area.height / 2;
+  const y = anchorIsNearTop
+    ? Math.min(anchor.y + PANEL_MARGIN, area.y + area.height - PANEL_HEIGHT - PANEL_MARGIN)
+    : Math.max(anchor.y - PANEL_HEIGHT - PANEL_MARGIN, area.y + PANEL_MARGIN);
+
+  win.setPosition(x, Math.round(y), false);
+}
+
+/** The point the panel should hang off: the tray icon's centre, or the cursor on Linux. */
+function trayAnchorPoint(): Electron.Point {
+  // getBounds() is darwin/win32 only. An empty rect is also possible if the tray is not
+  // yet realised, so treat a zero-size rect as "unknown" rather than trusting it.
+  if (tray && process.platform !== 'linux') {
+    const b = tray.getBounds();
+    if (b.width > 0 || b.height > 0) {
+      return { x: Math.round(b.x + b.width / 2), y: Math.round(b.y + b.height / 2) };
+    }
+  }
+  return screen.getCursorScreenPoint();
+}
+
 function createStatusWindow(): void {
   if (statusWindow && !statusWindow.isDestroyed()) {
+    positionPanelNearTray(statusWindow);
     statusWindow.show();
     statusWindow.focus();
     return;
   }
 
   statusWindow = new BrowserWindow({
-    width: 360,
-    height: 480,
+    width: PANEL_WIDTH,
+    height: PANEL_HEIGHT,
     resizable: false,
     maximizable: false,
     fullscreenable: false,
@@ -85,7 +143,11 @@ function createStatusWindow(): void {
   statusWindow.loadURL(MAIN_WINDOW_WEBPACK_ENTRY);
 
   statusWindow.once('ready-to-show', () => {
-    statusWindow?.show();
+    if (!statusWindow) return;
+    // Position before the first show, so the panel does not appear at the window manager's
+    // default spot and then visibly jump to the tray.
+    positionPanelNearTray(statusWindow);
+    statusWindow.show();
   });
 
   statusWindow.on('closed', () => {
