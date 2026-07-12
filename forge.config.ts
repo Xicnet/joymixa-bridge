@@ -30,6 +30,31 @@ function copyNativeModules(buildPath: string): void {
   }
 }
 
+/**
+ * Put OUR license at the package root.
+ *
+ * electron-packager writes Electron's own MIT LICENSE to the root of the packaged
+ * app. Joymixa Bridge is GPLv2+ (it links Ableton Link), so a user who unzips the
+ * app and opens the obvious file named `LICENSE` would read MIT for a GPLv2+
+ * binary. Our GPL text otherwise only reaches the package buried inside
+ * `resources/app.asar.unpacked/node_modules/@xicnet/abletonlink/`.
+ *
+ * Electron's MIT notice is a legitimate third-party notice, so it is preserved —
+ * just renamed so it no longer masquerades as the license of this application.
+ * `extraResource` cannot do this: it copies into `resources/`, not the root.
+ */
+function placeLicenses(finalPath: string): void {
+  const electronLicense = path.join(finalPath, 'LICENSE');
+  if (fs.existsSync(electronLicense)) {
+    fs.renameSync(electronLicense, path.join(finalPath, 'LICENSE.electron.txt'));
+  }
+  fs.copyFileSync(path.resolve(__dirname, 'LICENSE'), path.join(finalPath, 'LICENSE'));
+  fs.copyFileSync(
+    path.resolve(__dirname, 'THIRD-PARTY-NOTICES.txt'),
+    path.join(finalPath, 'THIRD-PARTY-NOTICES.txt'),
+  );
+}
+
 const config: ForgeConfig = {
   packagerConfig: {
     asar: {
@@ -43,6 +68,16 @@ const config: ForgeConfig = {
       (buildPath, _electronVersion, _platform, _arch, callback) => {
         try {
           copyNativeModules(buildPath);
+          callback();
+        } catch (err) {
+          callback(err as Error);
+        }
+      },
+    ],
+    afterComplete: [
+      (finalPath, _electronVersion, _platform, _arch, callback) => {
+        try {
+          placeLicenses(finalPath);
           callback();
         } catch (err) {
           callback(err as Error);
