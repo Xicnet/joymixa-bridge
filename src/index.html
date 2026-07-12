@@ -74,9 +74,15 @@
         <div class="phase-meta">
           <span class="phase-beat" id="phase-beat">1</span>
           <span class="phase-quantum" id="phase-quantum">/ 4 beats</span>
+          <!--
+            Count-in. Ableton "strongly recommends" showing when a start will actually
+            land, so a quantized launch is not a mystery wait. Only meaningful while the
+            transport is stopped — once playing, the phase bar is a position readout, not
+            a countdown — so this is shown by the .waiting class and hidden otherwise.
+          -->
+          <span class="phase-countin" id="phase-countin"></span>
         </div>
       </div>
-
     </div>
   </body>
 </html>
