@@ -63,6 +63,47 @@ const config: ForgeConfig = {
     name: 'Joymixa Bridge',
     executableName: 'joymixa-bridge',
     icon: './assets/icon',
+
+    /**
+     * macOS bundle identity.
+     *
+     * `appBundleId` is REQUIRED to notarize: without it the app ships under Electron's
+     * default `com.electron.*` identifier, which Apple will not notarize as ours.
+     *
+     * Treat this string as permanent. macOS keys the app's identity off it — preferences,
+     * keychain entries, and TCC permission grants (including the Local Network permission
+     * below) are all bound to it. Changing it later makes macOS see a brand-new app: the
+     * user must re-grant Local Network access, and settings are orphaned.
+     *
+     * The reverse-DNS form is a uniqueness *convention*, not a verification — Apple never
+     * checks domain ownership for it. So this string stays valid even if the domain later
+     * lapses or the product is renamed. `com.joymixa.*` matches the existing iOS bundle
+     * (`com.joymixa.linkbridge`, ios/LinkBridge.xcodeproj), keeping the two Apple platforms
+     * consistent. (Android is `com.xicnet.joymixabridge` — already published, so it cannot
+     * move; it does not constrain us here.)
+     */
+    appBundleId: 'com.joymixa.bridge',
+    appCategoryType: 'public.app-category.music',
+
+    // Surfaces as NSHumanReadableCopyright on macOS (the Get Info panel) and LegalCopyright
+    // on Windows. It was unset, so the shipped bundle claimed no copyright at all while the
+    // About box, README and THIRD-PARTY-NOTICES all did. "XicNET" is a trading name and
+    // cannot hold copyright; the natural person does.
+    appCopyright: 'Copyright (c) 2026 Ramiro Augusto Cosentino (XicNET). GPL-2.0-or-later.',
+
+    extendInfo: {
+      /**
+       * REQUIRED for Link to work at all on macOS 15+. Ableton Link discovers peers over
+       * UDP multicast on the local network; without this key macOS silently denies that
+       * access and the bridge reports **zero peers** while otherwise appearing healthy —
+       * a functional bug, not merely a signing one.
+       *
+       * This string is shown VERBATIM to the user in the macOS permission dialog.
+       */
+      NSLocalNetworkUsageDescription:
+        'Joymixa Bridge uses your local network to find and sync with Ableton Link devices.',
+    },
+
     extraResource: ['./assets/tray-icon.png'],
     afterCopy: [
       (buildPath, _electronVersion, _platform, _arch, callback) => {
