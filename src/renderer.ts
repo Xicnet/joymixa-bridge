@@ -19,6 +19,14 @@ const $ = (id: string) => document.getElementById(id)!;
 function updateUI(state: any): void {
   if (!state) return;
 
+  // Ableton's Link UI guidelines mandate the words "Enabled"/"Disabled" for the state
+  // readout. It was previously a hardcoded "Active" in the markup that nothing ever
+  // wrote to — so a bridge with a dead Link session still showed a green badge.
+  const linkEl = $('link-status');
+  linkEl.textContent = state.linkEnabled ? 'Enabled' : 'Disabled';
+  linkEl.classList.toggle('badge-active', state.linkEnabled);
+  linkEl.classList.toggle('badge-inactive', !state.linkEnabled);
+
   $('peer-count').textContent = String(state.numPeers);
   $('tempo').textContent = state.tempo.toFixed(1);
   $('transport').textContent = state.isPlaying ? 'Playing' : 'Stopped';

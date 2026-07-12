@@ -78,6 +78,7 @@ export interface BridgeState {
   numPeers: number;
   numClients: number;
   nextBar0Delay: number; // ms until next bar-0 boundary (from Link timeline)
+  linkEnabled: boolean;  // live from Link's own isEnabled(); false when the session never came up
 }
 
 const DEFAULT_CONFIG: BridgeConfig = {
@@ -844,6 +845,7 @@ export class Bridge extends EventEmitter {
         quantum: this.config.quantum,
         numPeers: 0,
         nextBar0Delay: 0,
+        linkEnabled: false,
       };
     }
     const quantum = this.config.quantum;
@@ -878,6 +880,7 @@ export class Bridge extends EventEmitter {
       quantum,
       numPeers: this.link.getNumPeers(),
       nextBar0Delay,
+      linkEnabled: this.link.isEnabled(),
       anchorTime,
     };
   }

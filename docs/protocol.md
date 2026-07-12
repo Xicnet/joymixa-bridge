@@ -73,6 +73,7 @@ Sent immediately when a client connects. Contains a full state snapshot.
   "numPeers": 1,
   "numClients": 2,
   "nextBar0Delay": 345.67,
+  "linkEnabled": true,
   "anchorTime": 60807.849,
   "measuredOutputLatency": 21.3,
   "latencyMethod": "alsa-delay(max=2048/48000@card0/pcm0p/sub0)",
@@ -88,6 +89,7 @@ Sent immediately when a client connects. Contains a full state snapshot.
 | `beat`         | float   | Current beat position on the Link timeline               |
 | `phase`        | float   | Position within the current quantum, in `[0, quantum)`   |
 | `quantum`      | float   | Phase-alignment unit, in beats (see §1) — **not** a time signature |
+| `linkEnabled`  | boolean | Whether the bridge's Link session is enabled (from Link's own `isEnabled()`). `false` means the bridge is up but not on the mesh — no sync. |
 | `anchorTime`   | float?  | Link-clock time (seconds) of `beat`, captured in the same atomic session-state snapshot. Clients extrapolate `beatAtTime` from the `(beat, anchorTime)` pair rather than from a bare BPM. Omitted only when no Link session exists. |
 | `numPeers`     | int     | Number of Link peers (excluding self)                    |
 | `numClients`   | int     | Number of connected WebSocket clients (including this one)|
@@ -116,6 +118,7 @@ Sent to all clients at `stateHz` frequency (default: 100 Hz, i.e. every 10 ms).
   "numPeers": 1,
   "numClients": 3,
   "nextBar0Delay": 345.67,
+  "linkEnabled": true,
   "anchorTime": 60807.849,
   "measuredOutputLatency": 21.3,
   "latencyMethod": "alsa-delay(max=2048/48000@card0/pcm0p/sub0)",

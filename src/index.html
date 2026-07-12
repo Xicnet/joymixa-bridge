@@ -14,7 +14,13 @@
       <div class="status-section">
         <div class="status-row">
           <span class="label">Link</span>
-          <span id="link-status" class="value badge badge-active">Active</span>
+          <!--
+            "Enabled"/"Disabled" is the wording Ableton's Link UI guidelines mandate — not
+            "Active"/"On". The value is written by the renderer from Link's own isEnabled();
+            the markup starts Disabled so a bridge whose Link session never came up cannot
+            render a green "Active" badge over a dead session.
+          -->
+          <span id="link-status" class="value badge badge-inactive">Disabled</span>
         </div>
         <div class="status-row">
           <span class="label">Link Peers</span>
