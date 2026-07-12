@@ -180,7 +180,7 @@ function showAbout(): void {
       '',
       `${APP_HOMEPAGE}`,
       '',
-      'GPL-2.0-or-later — Copyright (c) 2026 XicNET.',
+      'GPL-2.0-or-later — Copyright (c) 2026 Ramiro Augusto Cosentino (XicNET).',
       'Includes Ableton Link (GPLv2+), (c) Ableton AG.',
       `Complete corresponding source: ${APP_REPO}`,
     ].join('\n'),
