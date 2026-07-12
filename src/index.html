@@ -2,6 +2,23 @@
 <html>
   <head>
     <meta charset="UTF-8" />
+    <!--
+      Defence in depth for the renderer. It is a local, fixed page whose every value arrives
+      over IPC: it makes no network requests of any kind (no fetch, no XHR, no WebSocket, no
+      remote font or image), so those directives are 'none' rather than 'self' — nothing can
+      be exfiltrated to, or pulled from, a remote origin even if a script were injected.
+
+      Two deliberate relaxations, both forced by the build toolchain:
+        style-src 'unsafe-inline' — webpack's style-loader injects the CSS as a <style>
+          element at runtime. Removing this needs MiniCssExtractPlugin (CSS to a real file).
+        script-src 'unsafe-eval'  — dev only (`electron-forge start`) uses eval-based source
+          maps. The packaged build does not, but a meta CSP cannot vary by environment; a
+          CSP that breaks the dev server is worse than none.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'none'; font-src 'none'; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'"
+    />
     <title>Joymixa Bridge</title>
   </head>
   <body>

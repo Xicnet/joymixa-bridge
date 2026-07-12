@@ -62,6 +62,26 @@ function createStatusWindow(): void {
     },
   });
 
+  // The status window is a fixed local page: it never navigates and never opens a window.
+  // Defence in depth — contextIsolation, nodeIntegration:false and the Fuses already stand
+  // between a compromised renderer and the system. But if anything ever did inject a link
+  // or a script into this page, these two handlers are what stop it from navigating the
+  // window to an attacker's origin (where it would inherit this window's privileges) or
+  // spawning a new BrowserWindow. Deny both; route any legitimate external link through the
+  // OS browser instead, which is how the About dialog already opens the homepage and repo.
+  statusWindow.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('https://')) void shell.openExternal(url);
+    return { action: 'deny' };
+  });
+
+  statusWindow.webContents.on('will-navigate', (event, url) => {
+    // The only load this window should ever perform is its own entry point.
+    if (url !== MAIN_WINDOW_WEBPACK_ENTRY) {
+      event.preventDefault();
+      console.warn(`[bridge] blocked navigation attempt to: ${url}`);
+    }
+  });
+
   statusWindow.loadURL(MAIN_WINDOW_WEBPACK_ENTRY);
 
   statusWindow.once('ready-to-show', () => {
