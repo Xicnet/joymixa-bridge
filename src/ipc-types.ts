@@ -28,7 +28,6 @@ export interface BeatTick {
  */
 export interface BridgeApi {
   getState: () => Promise<BridgeState | null>;
-  getPort: () => Promise<number>;
   closeWindow: () => Promise<void>;
   /** Returns an unsubscribe function. */
   onUpdate: (callback: (state: BridgeState | null) => void) => () => void;

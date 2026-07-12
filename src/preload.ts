@@ -3,7 +3,6 @@ import type { BeatTick, BridgeApi, BridgeState } from './ipc-types';
 
 const api: BridgeApi = {
   getState: () => ipcRenderer.invoke('get-state'),
-  getPort: () => ipcRenderer.invoke('get-port'),
   closeWindow: () => ipcRenderer.invoke('close-window'),
   onUpdate: (callback: (state: BridgeState | null) => void) => {
     const handler = (_event: IpcRendererEvent, state: BridgeState | null) => callback(state);

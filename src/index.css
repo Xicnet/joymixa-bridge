@@ -96,13 +96,6 @@ body {
   margin: 16px 0;
 }
 
-.ws-url {
-  font-size: 11px;
-  color: #606080;
-  font-family: 'SF Mono', 'Fira Code', monospace;
-  text-align: center;
-}
-
 /* Phase bar — fill is phase/quantum, ticks are generated from the live quantum.
    See src/index.html: Link has no time signature, so nothing here assumes 4/4. */
 .phase {

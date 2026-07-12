@@ -49,10 +49,6 @@ async function init(): Promise<void> {
   const state = await window.bridge.getState();
   updateUI(state);
 
-  // Show connection URL — always loopback (the browser connects over 127.0.0.1).
-  const port = await window.bridge.getPort();
-  $('ws-url').textContent = `ws://127.0.0.1:${port}`;
-
   // Listen for live updates from main process
   window.bridge.onUpdate((updatedState) => {
     updateUI(updatedState);

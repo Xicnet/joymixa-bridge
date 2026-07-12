@@ -252,10 +252,6 @@ function setupIPC(): void {
     return bridge?.getState() ?? null;
   });
 
-  ipcMain.handle('get-port', () => {
-    return 20809;
-  });
-
   ipcMain.handle('close-window', () => {
     statusWindow?.hide();
   });
