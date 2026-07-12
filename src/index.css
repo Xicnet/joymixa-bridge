@@ -129,49 +129,77 @@ body {
   border-color: #00d26a;
 }
 
-/* Beat LEDs */
-.beat-leds {
-  display: flex;
-  gap: 12px;
-  justify-content: center;
-  padding: 8px 0;
+/* Phase bar — fill is phase/quantum, ticks are generated from the live quantum.
+   See src/index.html: Link has no time signature, so nothing here assumes 4/4. */
+.phase {
+  padding: 4px 0;
 }
 
-.beat-led {
-  width: 48px;
-  height: 48px;
-  border-radius: 50%;
+.phase-bar {
+  position: relative;
+  height: 10px;
+  border-radius: 5px;
   background: #252540;
-  border: 3px solid #3a3a5a;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: background 0.05s, border-color 0.05s, box-shadow 0.05s;
+  overflow: hidden;
 }
 
-.beat-num {
-  font-size: 16px;
-  font-weight: 700;
-  color: #505068;
-  transition: color 0.05s;
-}
-
-.beat-led.active {
+.phase-fill {
+  position: absolute;
+  inset: 0;
+  border-radius: 5px;
   background: #ff1493;
-  border-color: #ff69b4;
-  box-shadow: 0 0 20px rgba(255, 20, 147, 0.6), 0 0 40px rgba(255, 20, 147, 0.3);
+  transform: scaleX(0);
+  transform-origin: left center;
+  /* No transition: this is driven per-frame from the Link phase. A transition
+     would lag the audio and, at the wrap, animate backwards across the bar. */
+  will-change: transform;
 }
 
-.beat-led.active .beat-num {
-  color: #fff;
-}
-
-.beat-led.downbeat {
+.phase.downbeat .phase-fill {
   background: #00d26a;
-  border-color: #4dffa0;
-  box-shadow: 0 0 20px rgba(0, 210, 106, 0.6), 0 0 40px rgba(0, 210, 106, 0.3);
 }
 
-.beat-led.downbeat .beat-num {
-  color: #fff;
+/* While stopped, the bar reads as a count-in to the next quantum boundary
+   rather than a live position — mute it so it doesn't imply playback. */
+.phase.waiting .phase-fill {
+  background: #3a3a5a;
+}
+
+.phase-ticks {
+  position: absolute;
+  inset: 0;
+}
+
+/* Dividers between beats. Only the interior ones are drawn — see renderer.ts. */
+.phase-tick {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: #1a1a2e;
+}
+
+.phase-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: center;
+  gap: 4px;
+  margin-top: 8px;
+}
+
+.phase-beat {
+  font-size: 15px;
+  font-weight: 700;
+  color: #e0e0f0;
+  font-variant-numeric: tabular-nums;
+}
+
+.phase.waiting .phase-beat {
+  color: #606080;
+}
+
+.phase-quantum {
+  font-size: 11px;
+  color: #606080;
+  letter-spacing: 0.5px;
 }

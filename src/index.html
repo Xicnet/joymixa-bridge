@@ -36,11 +36,22 @@
 
       <div class="divider"></div>
 
-      <div class="beat-leds">
-        <div class="beat-led" id="beat-0"><span class="beat-num">1</span></div>
-        <div class="beat-led" id="beat-1"><span class="beat-num">2</span></div>
-        <div class="beat-led" id="beat-2"><span class="beat-num">3</span></div>
-        <div class="beat-led" id="beat-3"><span class="beat-num">4</span></div>
+      <!--
+        Phase bar. Ableton Link has no time-signature concept: it exposes a
+        `quantum` (a phase-alignment unit measured in beats) and a `phase` in
+        [0, quantum). The tick marks are therefore generated from the live
+        quantum, never hardcoded to 4 — a fixed 4-LED row silently assumes 4/4
+        and cannot represent a non-integer quantum at all.
+      -->
+      <div class="phase" id="phase">
+        <div class="phase-bar">
+          <div class="phase-fill" id="phase-fill"></div>
+          <div class="phase-ticks" id="phase-ticks"></div>
+        </div>
+        <div class="phase-meta">
+          <span class="phase-beat" id="phase-beat">1</span>
+          <span class="phase-quantum" id="phase-quantum">/ 4 beats</span>
+        </div>
       </div>
 
       <div class="divider"></div>
