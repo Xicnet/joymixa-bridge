@@ -143,8 +143,6 @@ export class Bridge extends EventEmitter {
   private lastLoggedStateTempo: number | null = null;
   private running = false;
   private stopped = false;
-  // Phase-alignment diagnostics — set false before release builds.
-  private diagLog = true;
 
   // Native audio output latency measurement (ms)
   private measuredOutputLatency: number | null = null;
@@ -328,9 +326,7 @@ export class Bridge extends EventEmitter {
     const { latencyMs, sampleRate, deviceLatency, streamLatency, safetyOffset, bufferFrames } = result;
     const method = `coreaudio(dev=${deviceLatency}+stream=${streamLatency}+safety=${safetyOffset}+buf=${bufferFrames}@${sampleRate}Hz)`;
 
-    if (this.diagLog) {
-      this.log(`[Bridge] CoreAudio detail: deviceLatency=${deviceLatency} streamLatency=${streamLatency} safetyOffset=${safetyOffset} bufferFrames=${bufferFrames} sampleRate=${sampleRate} → ${latencyMs.toFixed(2)}ms`);
-    }
+    this.log(`[Bridge] CoreAudio detail: deviceLatency=${deviceLatency} streamLatency=${streamLatency} safetyOffset=${safetyOffset} bufferFrames=${bufferFrames} sampleRate=${sampleRate} → ${latencyMs.toFixed(2)}ms`);
 
     return { latencyMs, method };
   }
@@ -425,9 +421,7 @@ export class Bridge extends EventEmitter {
     const { devicePeriod, sampleRate, bufferMultiplier } = maxSample;
     const method = `wasapi(period=${devicePeriod.toFixed(2)}ms×${bufferMultiplier}@${sampleRate}Hz${isBluetoothHint ? ',btHint' : ''})`;
 
-    if (this.diagLog) {
-      this.log(`[Bridge] WASAPI detail: devicePeriod=${devicePeriod.toFixed(2)}ms bufferMultiplier=${bufferMultiplier} sampleRate=${sampleRate} formFactor=${formFactor ?? 'n/a'} isBluetoothHint=${isBluetoothHint} → ${latencyMs.toFixed(2)}ms`);
-    }
+    this.log(`[Bridge] WASAPI detail: devicePeriod=${devicePeriod.toFixed(2)}ms bufferMultiplier=${bufferMultiplier} sampleRate=${sampleRate} formFactor=${formFactor ?? 'n/a'} isBluetoothHint=${isBluetoothHint} → ${latencyMs.toFixed(2)}ms`);
 
     return { latencyMs, method };
   }
@@ -477,11 +471,11 @@ export class Bridge extends EventEmitter {
       const pct = (diff / alsaLatencyMs) * 100;
       if (pct > 20) {
         this.log(`[Bridge] Latency cross-check: ALSA=${alsaLatencyMs.toFixed(1)}ms vs PipeWire=${pw.latencyMs.toFixed(1)}ms — ${pct.toFixed(0)}% discrepancy`);
-      } else if (this.diagLog) {
+      } else {
         this.log(`[Bridge] Latency cross-check: ALSA=${alsaLatencyMs.toFixed(1)}ms ≈ PipeWire=${pw.latencyMs.toFixed(1)}ms — consistent`);
       }
     }).catch(() => {
-      if (this.diagLog) this.log('[Bridge] Latency cross-check: pw-metadata not available');
+      this.log('[Bridge] Latency cross-check: pw-metadata not available');
     });
   }
 
@@ -586,10 +580,8 @@ export class Bridge extends EventEmitter {
     const latencyMs = (maxDelay / rate) * 1000;
     const minMs = (minDelay / rate) * 1000;
 
-    if (this.diagLog) {
-      const mean = delays.reduce((a, b) => a + b, 0) / delays.length;
-      this.log(`[Bridge] ALSA delay sampling: device=${deviceId} rate=${rate} samples=${delays.length} min=${minDelay}(${minMs.toFixed(1)}ms) max=${maxDelay}(${latencyMs.toFixed(1)}ms) mean=${(mean / rate * 1000).toFixed(1)}ms`);
-    }
+    const mean = delays.reduce((a, b) => a + b, 0) / delays.length;
+    this.log(`[Bridge] ALSA delay sampling: device=${deviceId} rate=${rate} samples=${delays.length} min=${minDelay}(${minMs.toFixed(1)}ms) max=${maxDelay}(${latencyMs.toFixed(1)}ms) mean=${(mean / rate * 1000).toFixed(1)}ms`);
 
     this.latencyDiagnostics = `alsa-delay: device=${deviceId} rate=${rate} samples=${delays.length} min=${minDelay}(${minMs.toFixed(1)}ms) max=${maxDelay}(${latencyMs.toFixed(1)}ms)`;
 
@@ -624,9 +616,7 @@ export class Bridge extends EventEmitter {
             const parts = sub.split('/');
             const deviceId = parts.slice(-3).join('/');
 
-            if (this.diagLog) {
-              this.log(`[Bridge] ALSA hw_params: device=${deviceId} period=${periodSize} buffer=${bufferSize} rate=${rate} → ${latencyMs.toFixed(1)}ms (period×2)`);
-            }
+            this.log(`[Bridge] ALSA hw_params: device=${deviceId} period=${periodSize} buffer=${bufferSize} rate=${rate} → ${latencyMs.toFixed(1)}ms (period×2)`);
 
             this.latencyDiagnostics = `alsa-hwparams: device=${deviceId} period=${periodSize} buffer=${bufferSize} rate=${rate}`;
 
@@ -781,9 +771,7 @@ export class Bridge extends EventEmitter {
           : { latencyMethod: 'none' }),
       };
 
-      if (this.diagLog) {
-        this.log(`[Bridge:hello] sending: tempo=${helloState.tempo.toFixed(2)} isPlaying=${helloState.isPlaying} beat=${helloState.beat.toFixed(3)} phase=${helloState.phase.toFixed(3)}/${helloState.quantum} nextBar0Delay=${helloState.nextBar0Delay.toFixed(1)}ms peers=${helloState.numPeers} clients=${this.clients.size} measuredOutputLatency=${this.measuredOutputLatency?.toFixed(1) ?? 'none'}ms latencyMethod=${this.latencyMethod ?? 'none'}`);
-      }
+      this.log(`[Bridge:hello] sending: tempo=${helloState.tempo.toFixed(2)} isPlaying=${helloState.isPlaying} beat=${helloState.beat.toFixed(3)} phase=${helloState.phase.toFixed(3)}/${helloState.quantum} nextBar0Delay=${helloState.nextBar0Delay.toFixed(1)}ms peers=${helloState.numPeers} clients=${this.clients.size} measuredOutputLatency=${this.measuredOutputLatency?.toFixed(1) ?? 'none'}ms latencyMethod=${this.latencyMethod ?? 'none'}`);
 
       ws.send(JSON.stringify(helloMsg));
 
