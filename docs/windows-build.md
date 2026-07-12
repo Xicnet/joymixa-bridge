@@ -121,9 +121,14 @@ on a function that fits in 100 lines. All locals are hoisted before the first
 
 The portable `.zip` exists for testing without installing — unzip, run, no
 registry modifications, no SmartScreen "is this app trusted?" trail. Squirrel is
-the recommended end-user path because it handles updates and start-menu
-integration. The portable build is also useful for users on locked-down corporate
-machines where they can't run installers.
+the recommended end-user path because it gives start-menu integration. The
+portable build is also useful for users on locked-down corporate machines where
+they can't run installers.
+
+> **The app does NOT auto-update.** An earlier version of this page claimed
+> Squirrel "handles updates". It does not, as shipped: no updater is wired up at
+> all (no `electron-updater`, no update feed). Users update by downloading a new
+> build. Auto-update also requires code signing, which is not yet in place.
 
 ## Flagged uncertainties (need real-hardware calibration)
 
