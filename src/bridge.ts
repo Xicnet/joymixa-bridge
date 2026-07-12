@@ -169,7 +169,15 @@ export class Bridge extends EventEmitter {
 
   private log(msg: string): void {
     const line = `${new Date().toISOString()} ${msg}`;
-    console.log(msg);
+    // A packaged app has no devtools and no attached terminal, so this console.log()
+    // would write into the void. In dev (`electron-forge start`) it is how you read the
+    // bridge, so keep it there. Written as a bare `process.env` test, not a cached field:
+    // webpack substitutes NODE_ENV at build time, so this whole statement is
+    // dead-code-eliminated out of the packaged bundle (a cached `this.isDev` folds to a
+    // constant too, but leaves the call site behind as unreachable weight).
+    // Diagnostics do not depend on this: every line lands in the ring buffer regardless,
+    // and that is what the tray's "Copy Diagnostics" reads.
+    if (process.env.NODE_ENV !== 'production') console.log(msg);
     this.logBuffer.push(line);
     if (this.logBuffer.length > this.LOG_BUFFER_MAX) this.logBuffer.shift();
     this.fileLog?.write(line + '\n');
