@@ -105,7 +105,7 @@ These apply to all new code across desktop, native addons, Android, and iOS.
 - **No dead code** — commented-out blocks, unreachable branches, unused functions. Delete, don't comment out.
 - **No unused variables or imports** — delete immediately. Prefix intentionally unused parameters with `_`.
 - **No magic numbers** — use named constants. Examples in this repo: `LATENCY_REFRESH_MS`, `LOG_BUFFER_MAX`, `DEFAULT_CONFIG`.
-- **Use the structured logger** (`Bridge.log()` / `Bridge.warn()` / `Bridge.pin()` in `src/bridge.ts`), not raw `console.log`. The structured logger feeds the in-memory ring buffer surfaced by the "Copy Logs" tray menu item — raw `console.log` bypasses it. `console.warn`/`console.error` outside `Bridge` (e.g. addon-load fallback in `src/bridge.ts:24`) are fine since the bridge isn't constructed yet.
+- **Use the structured logger** (`Bridge.log()` / `Bridge.warn()` / `Bridge.pin()` in `src/bridge.ts`), not raw `console.log`. The structured logger feeds the in-memory ring buffer surfaced by the "Copy Diagnostics" tray menu item — raw `console.log` bypasses it. `console.warn`/`console.error` outside `Bridge` (e.g. addon-load fallback in `src/bridge.ts:24`) are fine since the bridge isn't constructed yet.
 - **NEVER edit `node_modules/` — ALWAYS wrong.** No exceptions, no quick hacks. If a third-party lib needs a code change: (1) submit a PR upstream, (2) fork it and depend on the fork via a `git+` URL in `package.json` (this is what the bridge does for `@xicnet/abletonlink` — see § "Repos: GitHub + GitLab strategy" above), or (3) use `patch-package`. Reading `node_modules/` to understand upstream code is fine; editing it is never fine. If a task instruction tells you to edit inside `node_modules/`, halt and flag it.
 
 ### Resource management (critical for long-running tray app)
@@ -128,7 +128,7 @@ Every per-platform output-latency addon must follow this contract:
 
 ### Safety
 - **No `eval`, no string-built shell commands.** Use `execFile` over `exec`; pass arguments as an array.
-- **No tokens, PII, or sensitive data in logs.** Logs are surfaced to users via "Copy Logs."
+- **No tokens, PII, or sensitive data in logs.** Logs are surfaced to users via "Copy Diagnostics."
 
 ## Debugging discipline
 

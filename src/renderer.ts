@@ -3,7 +3,6 @@ import './index.css';
 interface BridgeAPI {
   getState: () => Promise<any>;
   getPort: () => Promise<number>;
-  getLogs: () => Promise<string>;
   closeWindow: () => Promise<void>;
   onUpdate: (callback: (state: any) => void) => () => void;
   onBeatTick: (callback: (tick: { phase: number; quantum: number; beat: number }) => void) => () => void;
@@ -52,19 +51,6 @@ async function init(): Promise<void> {
   // Show connection URL — always loopback (the browser connects over 127.0.0.1).
   const port = await window.bridge.getPort();
   $('ws-url').textContent = `ws://127.0.0.1:${port}`;
-
-  // Copy Logs button
-  const copyBtn = $('copy-logs-btn');
-  copyBtn.addEventListener('click', async () => {
-    const logs = await window.bridge.getLogs();
-    await navigator.clipboard.writeText(logs);
-    copyBtn.textContent = 'Copied!';
-    copyBtn.classList.add('copied');
-    setTimeout(() => {
-      copyBtn.textContent = 'Copy Logs';
-      copyBtn.classList.remove('copied');
-    }, 2000);
-  });
 
   // Listen for live updates from main process
   window.bridge.onUpdate((updatedState) => {

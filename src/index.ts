@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, dialog, shell } from 'electron';
+import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, dialog, shell, clipboard } from 'electron';
 import * as path from 'path';
 import { Bridge } from './bridge';
 
@@ -109,6 +109,39 @@ function showAbout(): void {
   if (result === 2) shell.openExternal(APP_REPO);
 }
 
+/**
+ * Copy the log ring buffer to the clipboard, for a user reporting a problem.
+ *
+ * This lives in the tray menu rather than the status window: the window is a
+ * glanceable readout of the Link session, and a debug button does not belong in
+ * it. The tray menu is where desktop apps conventionally put diagnostics.
+ *
+ * A menu item gives no feedback of its own, so confirm the copy explicitly —
+ * otherwise the user cannot tell it worked.
+ */
+function copyDiagnostics(): void {
+  const logs = bridge?.getLogs() ?? '';
+  if (!logs) {
+    dialog.showMessageBoxSync({
+      type: 'info',
+      title: 'Joymixa Bridge',
+      message: 'No diagnostics available yet.',
+      detail: 'The bridge has not logged anything to report.',
+      buttons: ['OK'],
+    });
+    return;
+  }
+
+  clipboard.writeText(logs);
+  dialog.showMessageBoxSync({
+    type: 'info',
+    title: 'Joymixa Bridge',
+    message: 'Diagnostics copied to the clipboard.',
+    detail: 'Paste them into your bug report or support message.',
+    buttons: ['OK'],
+  });
+}
+
 function setupTray(): void {
   const icon = createTrayIcon();
   tray = new Tray(icon);
@@ -120,6 +153,10 @@ function setupTray(): void {
       click: () => toggleStatusWindow(),
     },
     { type: 'separator' },
+    {
+      label: 'Copy Diagnostics',
+      click: () => copyDiagnostics(),
+    },
     {
       label: 'About Joymixa Bridge',
       click: () => showAbout(),
@@ -158,10 +195,6 @@ function setupIPC(): void {
 
   ipcMain.handle('get-port', () => {
     return 20809;
-  });
-
-  ipcMain.handle('get-logs', () => {
-    return bridge?.getLogs() ?? '';
   });
 
   ipcMain.handle('close-window', () => {

@@ -41,7 +41,7 @@ without modifying the registry. Squirrel is the recommended end-user path.
    is installed, Bonjour is already there. Otherwise install Apple's standalone
    "Bonjour Print Services for Windows."
 
-3. **Verify audio latency measurement** — open the tray icon → Copy Logs. Look for:
+3. **Verify audio latency measurement** — right-click the tray icon → Copy Diagnostics. Look for:
 
    ```
    [Bridge] Audio latency: platform=win32 measuredOutputLatency=21.3ms method=wasapi(period=10.00ms×2@48000Hz)
@@ -49,7 +49,7 @@ without modifying the registry. Squirrel is the recommended end-user path.
 
    Healthy ranges: 20–40 ms on internal speakers / wired output, 100–300 ms on
    Bluetooth. If you see `measurement failed` or values outside those ranges, file
-   an issue with the full Copy Logs output.
+   an issue with the full Copy Diagnostics output.
 
 ## Architecture decisions captured at build time
 

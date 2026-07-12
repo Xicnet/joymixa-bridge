@@ -107,7 +107,7 @@ export class Bridge extends EventEmitter {
   private latencyRefreshInterval: ReturnType<typeof setInterval> | null = null;
   private readonly LATENCY_REFRESH_MS = 30_000;
 
-  // In-memory log ring buffer for "Copy Logs" feature
+  // In-memory log ring buffer surfaced by the tray "Copy Diagnostics" item
   private logBuffer: string[] = [];
   private readonly LOG_BUFFER_MAX = 2000;
   // Pinned lines survive ring buffer eviction (platform info, latency result)
