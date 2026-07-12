@@ -224,3 +224,15 @@ Builds are automated via GitHub Actions (`.github/workflows/build.yml`). Pushing
 - [Ableton Link](https://www.ableton.com/en/link/) -- the sync protocol
 - [@ktamas77/abletonlink](https://github.com/ktamas77/ableton-link) -- Node.js bindings (upstream)
 - [Xicnet/ableton-link](https://github.com/Xicnet/ableton-link) -- Patched fork with cross-platform build fix
+
+## License
+
+**GPL-2.0-or-later.** Copyright (c) 2026 Ramiro Augusto Cosentino (XicNET). See [LICENSE](LICENSE)
+for the full terms.
+
+The bridge links Ableton Link (Copyright (c) Ableton AG), which is itself GPLv2+, so the distributed
+binary is GPLv2+. This repository is the complete corresponding source. Per-component attribution is
+in [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt).
+
+Joymixa itself is a separate program: the bridge talks to it over a WebSocket and shares no code with
+it, so this licence does not extend to it.

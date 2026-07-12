@@ -1,4 +1,4 @@
-import { AbletonLink } from '@xicnet/abletonlink';
+import type { AbletonLink } from '@xicnet/abletonlink';
 import { WebSocketServer, WebSocket } from 'ws';
 import { EventEmitter } from 'events';
 import { execFile } from 'child_process';
@@ -6,6 +6,23 @@ import { readFile, readdir } from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 import { createWriteStream, WriteStream } from 'fs';
+
+// Ableton Link native addon. Loaded via a guarded require, not a static import:
+// @xicnet/abletonlink calls bindings() at module top-level, so a missing, corrupt,
+// or wrong-arch .node throws during import — before app 'ready', before Bridge
+// exists — and Electron shows a raw crash dump instead of an explicable error.
+// Deferring the failure to start() lets it surface as the same 'fatal' dialog as
+// every other startup failure. Mirrors the coreaudio/wasapi load pattern below.
+type AbletonLinkCtor = new (bpm: number) => AbletonLink;
+let abletonLinkAddon: AbletonLinkCtor | null = null;
+let abletonLinkLoadError: string | null = null;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-var-requires
+  abletonLinkAddon = (require('@xicnet/abletonlink') as { AbletonLink: AbletonLinkCtor }).AbletonLink;
+} catch (e) {
+  abletonLinkLoadError = (e as Error).message;
+  console.error('[Bridge] Ableton Link native addon failed to load:', abletonLinkLoadError);
+}
 
 // CoreAudio native addon (macOS only) — returns null on other platforms
 interface CoreAudioResult {
@@ -61,6 +78,52 @@ export interface BridgeState {
   numPeers: number;
   numClients: number;
   nextBar0Delay: number; // ms until next bar-0 boundary (from Link timeline)
+  linkEnabled: boolean;  // live from Link's own isEnabled(); false when the session never came up
+}
+
+/**
+ * Origins allowed to open a WebSocket to the bridge.
+ *
+ * Without this, ANY website the user happens to visit can open a socket to
+ * 127.0.0.1:20809 and drive the session — set-tempo, play, stop,
+ * force-beat-at-time, relay. WebSockets are deliberately NOT subject to the
+ * same-origin policy, so binding to loopback is no defence at all: the attacker's
+ * page runs *on the user's machine*. And the blast radius is not just the browser
+ * tab — the bridge is a Link peer, so a forced tempo change propagates to every
+ * device in the user's Link session (their Live, their hardware).
+ *
+ * `localhost` entries cover the dev server; the joymixa.com suffix covers prod
+ * plus test./dev1. staging (see src/environments/* in the joymixa repo).
+ */
+const ALLOWED_ORIGIN_HOSTS = ['joymixa.com', 'localhost', '127.0.0.1'];
+
+/**
+ * Is this handshake's Origin allowed?
+ *
+ * A browser always sends `Origin` on a WebSocket handshake and a page CANNOT forge
+ * it — which is exactly what makes this check work against the threat above.
+ *
+ * A *missing* Origin means the client is not a browser (curl, a native app, our own
+ * `tools/cdp/*.mjs` Link-peer harnesses). Those are allowed through: a local process
+ * can forge any header it likes, so rejecting them buys no security whatsoever, while
+ * breaking the test harness. This is an anti-CSRF control, NOT authentication — do not
+ * mistake it for one.
+ */
+export function isOriginAllowed(origin: string | undefined): boolean {
+  if (!origin) return true; // not a browser — see above
+
+  let hostname: string;
+  try {
+    ({ hostname } = new URL(origin));
+  } catch {
+    return false; // unparseable Origin — a browser never sends one
+  }
+
+  // Suffix match on the *parsed hostname*, never on the raw string: a substring test
+  // would happily accept `https://joymixa.com.evil.com`.
+  return ALLOWED_ORIGIN_HOSTS.some(
+    (host) => hostname === host || hostname.endsWith(`.${host}`),
+  );
 }
 
 const DEFAULT_CONFIG: BridgeConfig = {
@@ -79,8 +142,7 @@ export class Bridge extends EventEmitter {
   private stateInterval: ReturnType<typeof setInterval> | null = null;
   private lastLoggedStateTempo: number | null = null;
   private running = false;
-  // Phase-alignment diagnostics — set false before release builds.
-  private diagLog = true;
+  private stopped = false;
 
   // Native audio output latency measurement (ms)
   private measuredOutputLatency: number | null = null;
@@ -89,7 +151,7 @@ export class Bridge extends EventEmitter {
   private latencyRefreshInterval: ReturnType<typeof setInterval> | null = null;
   private readonly LATENCY_REFRESH_MS = 30_000;
 
-  // In-memory log ring buffer for "Copy Logs" feature
+  // In-memory log ring buffer surfaced by the tray "Copy Diagnostics" item
   private logBuffer: string[] = [];
   private readonly LOG_BUFFER_MAX = 2000;
   // Pinned lines survive ring buffer eviction (platform info, latency result)
@@ -107,7 +169,15 @@ export class Bridge extends EventEmitter {
 
   private log(msg: string): void {
     const line = `${new Date().toISOString()} ${msg}`;
-    console.log(msg);
+    // A packaged app has no devtools and no attached terminal, so this console.log()
+    // would write into the void. In dev (`electron-forge start`) it is how you read the
+    // bridge, so keep it there. Written as a bare `process.env` test, not a cached field:
+    // webpack substitutes NODE_ENV at build time, so this whole statement is
+    // dead-code-eliminated out of the packaged bundle (a cached `this.isDev` folds to a
+    // constant too, but leaves the call site behind as unreachable weight).
+    // Diagnostics do not depend on this: every line lands in the ring buffer regardless,
+    // and that is what the tray's "Copy Diagnostics" reads.
+    if (process.env.NODE_ENV !== 'production') console.log(msg);
     this.logBuffer.push(line);
     if (this.logBuffer.length > this.LOG_BUFFER_MAX) this.logBuffer.shift();
     this.fileLog?.write(line + '\n');
@@ -264,9 +334,7 @@ export class Bridge extends EventEmitter {
     const { latencyMs, sampleRate, deviceLatency, streamLatency, safetyOffset, bufferFrames } = result;
     const method = `coreaudio(dev=${deviceLatency}+stream=${streamLatency}+safety=${safetyOffset}+buf=${bufferFrames}@${sampleRate}Hz)`;
 
-    if (this.diagLog) {
-      this.log(`[Bridge] CoreAudio detail: deviceLatency=${deviceLatency} streamLatency=${streamLatency} safetyOffset=${safetyOffset} bufferFrames=${bufferFrames} sampleRate=${sampleRate} → ${latencyMs.toFixed(2)}ms`);
-    }
+    this.log(`[Bridge] CoreAudio detail: deviceLatency=${deviceLatency} streamLatency=${streamLatency} safetyOffset=${safetyOffset} bufferFrames=${bufferFrames} sampleRate=${sampleRate} → ${latencyMs.toFixed(2)}ms`);
 
     return { latencyMs, method };
   }
@@ -361,9 +429,7 @@ export class Bridge extends EventEmitter {
     const { devicePeriod, sampleRate, bufferMultiplier } = maxSample;
     const method = `wasapi(period=${devicePeriod.toFixed(2)}ms×${bufferMultiplier}@${sampleRate}Hz${isBluetoothHint ? ',btHint' : ''})`;
 
-    if (this.diagLog) {
-      this.log(`[Bridge] WASAPI detail: devicePeriod=${devicePeriod.toFixed(2)}ms bufferMultiplier=${bufferMultiplier} sampleRate=${sampleRate} formFactor=${formFactor ?? 'n/a'} isBluetoothHint=${isBluetoothHint} → ${latencyMs.toFixed(2)}ms`);
-    }
+    this.log(`[Bridge] WASAPI detail: devicePeriod=${devicePeriod.toFixed(2)}ms bufferMultiplier=${bufferMultiplier} sampleRate=${sampleRate} formFactor=${formFactor ?? 'n/a'} isBluetoothHint=${isBluetoothHint} → ${latencyMs.toFixed(2)}ms`);
 
     return { latencyMs, method };
   }
@@ -413,11 +479,11 @@ export class Bridge extends EventEmitter {
       const pct = (diff / alsaLatencyMs) * 100;
       if (pct > 20) {
         this.log(`[Bridge] Latency cross-check: ALSA=${alsaLatencyMs.toFixed(1)}ms vs PipeWire=${pw.latencyMs.toFixed(1)}ms — ${pct.toFixed(0)}% discrepancy`);
-      } else if (this.diagLog) {
+      } else {
         this.log(`[Bridge] Latency cross-check: ALSA=${alsaLatencyMs.toFixed(1)}ms ≈ PipeWire=${pw.latencyMs.toFixed(1)}ms — consistent`);
       }
     }).catch(() => {
-      if (this.diagLog) this.log('[Bridge] Latency cross-check: pw-metadata not available');
+      this.log('[Bridge] Latency cross-check: pw-metadata not available');
     });
   }
 
@@ -522,10 +588,8 @@ export class Bridge extends EventEmitter {
     const latencyMs = (maxDelay / rate) * 1000;
     const minMs = (minDelay / rate) * 1000;
 
-    if (this.diagLog) {
-      const mean = delays.reduce((a, b) => a + b, 0) / delays.length;
-      this.log(`[Bridge] ALSA delay sampling: device=${deviceId} rate=${rate} samples=${delays.length} min=${minDelay}(${minMs.toFixed(1)}ms) max=${maxDelay}(${latencyMs.toFixed(1)}ms) mean=${(mean / rate * 1000).toFixed(1)}ms`);
-    }
+    const mean = delays.reduce((a, b) => a + b, 0) / delays.length;
+    this.log(`[Bridge] ALSA delay sampling: device=${deviceId} rate=${rate} samples=${delays.length} min=${minDelay}(${minMs.toFixed(1)}ms) max=${maxDelay}(${latencyMs.toFixed(1)}ms) mean=${(mean / rate * 1000).toFixed(1)}ms`);
 
     this.latencyDiagnostics = `alsa-delay: device=${deviceId} rate=${rate} samples=${delays.length} min=${minDelay}(${minMs.toFixed(1)}ms) max=${maxDelay}(${latencyMs.toFixed(1)}ms)`;
 
@@ -560,9 +624,7 @@ export class Bridge extends EventEmitter {
             const parts = sub.split('/');
             const deviceId = parts.slice(-3).join('/');
 
-            if (this.diagLog) {
-              this.log(`[Bridge] ALSA hw_params: device=${deviceId} period=${periodSize} buffer=${bufferSize} rate=${rate} → ${latencyMs.toFixed(1)}ms (period×2)`);
-            }
+            this.log(`[Bridge] ALSA hw_params: device=${deviceId} period=${periodSize} buffer=${bufferSize} rate=${rate} → ${latencyMs.toFixed(1)}ms (period×2)`);
 
             this.latencyDiagnostics = `alsa-hwparams: device=${deviceId} period=${periodSize} buffer=${bufferSize} rate=${rate}`;
 
@@ -579,10 +641,30 @@ export class Bridge extends EventEmitter {
     if (this.running) return;
     this.running = true;
 
-    // Ableton Link
-    this.link = new AbletonLink(this.config.defaultBpm);
-    this.link.enable(true);
-    this.link.enableStartStopSync(true);
+    // Ableton Link. Two distinct failures, both of which used to leave the tray
+    // icon up over a dead bridge: the addon never loaded (see the guarded require
+    // above), or the native session refused to start. start() is invoked
+    // fire-and-forget from the app 'ready' handler, so surface them rather than
+    // rejecting into the void.
+    if (!abletonLinkAddon) {
+      this.running = false;
+      const msg = `Ableton Link native module could not be loaded: ${abletonLinkLoadError ?? 'unknown error'}`;
+      this.warn(`[bridge] ${msg}`);
+      this.emit('fatal', { reason: 'link-unavailable', message: msg });
+      return;
+    }
+
+    try {
+      this.link = new abletonLinkAddon(this.config.defaultBpm);
+      this.link.enable(true);
+      this.link.enableStartStopSync(true);
+    } catch (e) {
+      this.running = false;
+      const msg = e instanceof Error ? e.message : String(e);
+      this.warn(`[bridge] Ableton Link failed to start: ${msg}`);
+      this.emit('fatal', { reason: 'link-failed', message: msg });
+      return;
+    }
 
     this.log(`[bridge] Link enabled. peers: ${this.link.getNumPeers()}`);
 
@@ -639,7 +721,30 @@ export class Bridge extends EventEmitter {
     // WebSocket server — loopback only. The browser always connects over
     // ws://127.0.0.1; HTTPS pages can't reach a LAN-IP ws:// (mixed content),
     // so binding all interfaces would only expose the port, never serve a client.
-    this.wss = new WebSocketServer({ host: '127.0.0.1', port: this.config.port });
+    this.wss = new WebSocketServer({
+      host: '127.0.0.1',
+      port: this.config.port,
+      // Reject cross-origin pages before the handshake completes (ws aborts with 401).
+      // Logged, not silent: "the Bridge won't connect" is otherwise unexplainable to a
+      // user running the app from an origin we don't ship.
+      verifyClient: ({ origin }: { origin?: string }) => {
+        if (isOriginAllowed(origin)) return true;
+        this.warn(`[bridge] rejected WebSocket handshake from disallowed origin: ${origin}`);
+        return false;
+      },
+    });
+
+    // A listen failure (EADDRINUSE when a second instance or another app holds
+    // the port) arrives as an async 'error' event, not a constructor throw. With
+    // no listener, EventEmitter rethrows it as an uncaught exception.
+    this.wss.on('error', (e: NodeJS.ErrnoException) => {
+      const inUse = e.code === 'EADDRINUSE';
+      this.warn(`[bridge] WebSocket server error: ${e.code ?? ''} ${e.message}`);
+      if (!inUse) return;
+      this.running = false;
+      this.emit('fatal', { reason: 'port-in-use', message: `Port ${this.config.port} is already in use.`, port: this.config.port });
+    });
+
     this.log(`[bridge] WebSocket listening on ws://127.0.0.1:${this.config.port}`);
 
     this.wss.on('connection', (ws: WebSocket) => {
@@ -674,9 +779,7 @@ export class Bridge extends EventEmitter {
           : { latencyMethod: 'none' }),
       };
 
-      if (this.diagLog) {
-        this.log(`[Bridge:hello] sending: tempo=${helloState.tempo.toFixed(2)} isPlaying=${helloState.isPlaying} beat=${helloState.beat.toFixed(3)} phase=${helloState.phase.toFixed(3)}/${helloState.quantum} nextBar0Delay=${helloState.nextBar0Delay.toFixed(1)}ms peers=${helloState.numPeers} clients=${this.clients.size} measuredOutputLatency=${this.measuredOutputLatency?.toFixed(1) ?? 'none'}ms latencyMethod=${this.latencyMethod ?? 'none'}`);
-      }
+      this.log(`[Bridge:hello] sending: tempo=${helloState.tempo.toFixed(2)} isPlaying=${helloState.isPlaying} beat=${helloState.beat.toFixed(3)} phase=${helloState.phase.toFixed(3)}/${helloState.quantum} nextBar0Delay=${helloState.nextBar0Delay.toFixed(1)}ms peers=${helloState.numPeers} clients=${this.clients.size} measuredOutputLatency=${this.measuredOutputLatency?.toFixed(1) ?? 'none'}ms latencyMethod=${this.latencyMethod ?? 'none'}`);
 
       ws.send(JSON.stringify(helloMsg));
 
@@ -735,7 +838,11 @@ export class Bridge extends EventEmitter {
   }
 
   stop(): void {
-    if (!this.running) return;
+    // Not gated on `running`: a fatal start failure clears the flag while leaving
+    // a half-open server and live timers behind, and those still need releasing.
+    // `stopped` guards the tail so a repeat call can't re-emit or re-end the log.
+    if (this.stopped) return;
+    this.stopped = true;
     this.running = false;
 
     if (this.stateInterval) {
@@ -754,6 +861,7 @@ export class Bridge extends EventEmitter {
       }
       this.clients.clear();
       this.clientLoopBeats.clear();
+      this.wss.removeAllListeners();
       this.wss.close();
       this.wss = null;
     }
@@ -789,6 +897,7 @@ export class Bridge extends EventEmitter {
         quantum: this.config.quantum,
         numPeers: 0,
         nextBar0Delay: 0,
+        linkEnabled: false,
       };
     }
     const quantum = this.config.quantum;
@@ -823,6 +932,7 @@ export class Bridge extends EventEmitter {
       quantum,
       numPeers: this.link.getNumPeers(),
       nextBar0Delay,
+      linkEnabled: this.link.isEnabled(),
       anchorTime,
     };
   }

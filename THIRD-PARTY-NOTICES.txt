@@ -20,5 +20,5 @@ Components and their origins:
 3. Electron, and other npm dependencies — see their respective licenses in
    node_modules and the generated licenses manifest produced at package time.
 
-4. Joymixa Bridge application code — Copyright (c) 2026 XicNET.
-   Licensed GPL-2.0-or-later.
+4. Joymixa Bridge application code — Copyright (c) 2026 Ramiro Augusto
+   Cosentino (XicNET). Licensed GPL-2.0-or-later.

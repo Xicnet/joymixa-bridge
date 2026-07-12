@@ -1,24 +1,41 @@
 import './index.css';
-
-interface BridgeAPI {
-  getState: () => Promise<any>;
-  getPort: () => Promise<number>;
-  getLogs: () => Promise<string>;
-  closeWindow: () => Promise<void>;
-  onUpdate: (callback: (state: any) => void) => () => void;
-  onBeatTick: (callback: (tick: { phase: number; quantum: number; beat: number }) => void) => () => void;
-}
+import type { BridgeApi, BridgeState } from './ipc-types';
 
 declare global {
   interface Window {
-    bridge: BridgeAPI;
+    bridge: BridgeApi;
   }
 }
 
 const $ = (id: string) => document.getElementById(id)!;
 
-function updateUI(state: any): void {
+/**
+ * Tempo and transport state, mirrored out of the event-driven `bridge-update` stream so the
+ * per-frame render loop can reach them.
+ *
+ * The count-in needs tempo to turn "beats remaining" into "seconds remaining", but tempo
+ * only arrives on state updates, while the countdown has to be redrawn every frame against
+ * the 100 Hz phase feed. Deriving the countdown from the phase tick (rather than from the
+ * state message's own `nextBar0Delay`) is what keeps it smooth: `nextBar0Delay` is only
+ * recomputed when some *event* fires, so a countdown driven off it would sit frozen and
+ * then jump.
+ */
+let tempo = 0;
+let isPlaying = false;
+
+function updateUI(state: BridgeState | null): void {
   if (!state) return;
+
+  tempo = state.tempo;
+  isPlaying = state.isPlaying;
+
+  // Ableton's Link UI guidelines mandate the words "Enabled"/"Disabled" for the state
+  // readout. It was previously a hardcoded "Active" in the markup that nothing ever
+  // wrote to — so a bridge with a dead Link session still showed a green badge.
+  const linkEl = $('link-status');
+  linkEl.textContent = state.linkEnabled ? 'Enabled' : 'Disabled';
+  linkEl.classList.toggle('badge-active', state.linkEnabled);
+  linkEl.classList.toggle('badge-inactive', !state.linkEnabled);
 
   $('peer-count').textContent = String(state.numPeers);
   $('tempo').textContent = state.tempo.toFixed(1);
@@ -31,6 +48,12 @@ function updateUI(state: any): void {
   } else {
     transportEl.classList.remove('playing');
   }
+
+  // While the transport is stopped the phase bar is a count-in: it shows where
+  // the Link timeline is, and therefore when a start would actually land. Ableton
+  // shows the same thing (Live's Arrangement Position progress bar appears only
+  // while stopped) and recommends the affordance for quantized launching.
+  $('phase').classList.toggle('waiting', !state.isPlaying);
 }
 
 async function init(): Promise<void> {
@@ -43,45 +66,109 @@ async function init(): Promise<void> {
   const state = await window.bridge.getState();
   updateUI(state);
 
-  // Show connection URL — always loopback (the browser connects over 127.0.0.1).
-  const port = await window.bridge.getPort();
-  $('ws-url').textContent = `ws://127.0.0.1:${port}`;
-
-  // Copy Logs button
-  const copyBtn = $('copy-logs-btn');
-  copyBtn.addEventListener('click', async () => {
-    const logs = await window.bridge.getLogs();
-    await navigator.clipboard.writeText(logs);
-    copyBtn.textContent = 'Copied!';
-    copyBtn.classList.add('copied');
-    setTimeout(() => {
-      copyBtn.textContent = 'Copy Logs';
-      copyBtn.classList.remove('copied');
-    }, 2000);
-  });
-
   // Listen for live updates from main process
   window.bridge.onUpdate((updatedState) => {
     updateUI(updatedState);
   });
 
-  // Beat LEDs — track which beat is active based on Link phase
-  let prevBeat = -1;
-  const beatLeds = [0, 1, 2, 3].map(i => $(`beat-${i}`));
+  initPhaseBar();
+}
+
+/**
+ * Phase bar.
+ *
+ * Ableton Link exposes no time signature — only a `quantum` (a phase-alignment
+ * unit, measured in beats) and a `phase` in [0, quantum). So the bar renders
+ * `phase / quantum` as a fill that wraps at the boundary, and derives its tick
+ * marks from the live quantum. A fixed 4-LED row assumed 4/4 and could not
+ * represent a non-integer quantum (a 3.5-beat loop) at all.
+ *
+ * The bridge ticks at stateHz (100Hz), which is far above display refresh, so
+ * the tick handler only stores the latest phase; a rAF loop does the DOM writes.
+ */
+function initPhaseBar(): void {
+  const fillEl = $('phase-fill');
+  const ticksEl = $('phase-ticks');
+  const beatEl = $('phase-beat');
+  const quantumEl = $('phase-quantum');
+  const countInEl = $('phase-countin');
+  const phaseEl = $('phase');
+
+  let phase = 0;
+  let quantum = 0;
+  let renderedQuantum = -1;
+  let renderedBeat = -1;
+  let renderedCountIn = '';
 
   window.bridge.onBeatTick((tick) => {
-    const currentBeat = Math.floor(tick.phase);
-    if (currentBeat === prevBeat) return;
-    prevBeat = currentBeat;
+    phase = tick.phase;
+    quantum = tick.quantum;
+  });
 
-    for (let i = 0; i < beatLeds.length; i++) {
-      const led = beatLeds[i];
-      led.classList.remove('active', 'downbeat');
-      if (i === currentBeat) {
-        led.classList.add(i === 0 ? 'downbeat' : 'active');
+  const render = (): void => {
+    if (quantum > 0) {
+      // Rebuild the beat dividers only when the quantum itself changes.
+      if (quantum !== renderedQuantum) {
+        renderedQuantum = quantum;
+        // Dividers sit *between* beats, so beat 0's would land on the bar's own
+        // left edge and be invisible. Draw the interior ones only: beats 1..n-1.
+        // A non-integer quantum (a 3.5-beat loop) leaves a short final segment,
+        // which is correct — position each divider by its true fraction rather
+        // than assuming the bar divides evenly.
+        const dividers = Math.ceil(quantum) - 1;
+        ticksEl.replaceChildren(
+          ...Array.from({ length: Math.max(0, dividers) }, (_, i) => {
+            const tick = document.createElement('span');
+            tick.className = 'phase-tick';
+            tick.style.left = `${((i + 1) / quantum) * 100}%`;
+            return tick;
+          }),
+        );
+        quantumEl.textContent = `/ ${formatQuantum(quantum)} beats`;
+      }
+
+      fillEl.style.transform = `scaleX(${phase / quantum})`;
+
+      const beat = Math.floor(phase) + 1;
+      if (beat !== renderedBeat) {
+        renderedBeat = beat;
+        beatEl.textContent = String(beat);
+        phaseEl.classList.toggle('downbeat', beat === 1);
+      }
+
+      // Count-in: how long until a quantized start would actually land. Derived from the
+      // live phase rather than the state message's nextBar0Delay, which is only recomputed
+      // on an event and would leave the countdown frozen between updates.
+      const countIn = isPlaying ? '' : formatCountIn(quantum - phase, tempo);
+      if (countIn !== renderedCountIn) {
+        renderedCountIn = countIn;
+        countInEl.textContent = countIn;
       }
     }
-  });
+    requestAnimationFrame(render);
+  };
+  requestAnimationFrame(render);
+}
+
+/** Trim the trailing zeros a non-integer quantum would otherwise show (3.5, not 3.50). */
+function formatQuantum(quantum: number): string {
+  return Number.isInteger(quantum) ? String(quantum) : String(Number(quantum.toFixed(2)));
+}
+
+/**
+ * "starts in 1.4s" — the wait before a quantized launch lands on the next quantum boundary.
+ *
+ * Shown in seconds, not beats: the point is to answer "how long am I waiting", and a beat
+ * count means nothing without doing the tempo arithmetic in your head. Rendered to one
+ * decimal so it visibly counts down rather than sitting on an integer for most of a beat.
+ *
+ * Guards tempo <= 0: it is 0 until the first state message arrives, and dividing by it
+ * would print "Infinity".
+ */
+function formatCountIn(remainingBeats: number, bpm: number): string {
+  if (bpm <= 0 || remainingBeats <= 0) return '';
+  const seconds = remainingBeats * (60 / bpm);
+  return `starts in ${seconds.toFixed(1)}s`;
 }
 
 init();

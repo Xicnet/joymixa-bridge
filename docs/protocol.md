@@ -11,10 +11,10 @@ The reference implementation is the Electron/TypeScript bridge in this repositor
 ## 1. Overview
 
 ```
-┌──────────────┐   UDP multicast   ┌──────────────┐   WebSocket (JSON)   ┌─────────┐
-│ Ableton Live │ <──────────────>  │    Bridge     │ <──────────────────> │ Browser │
-│ or any Link  │   (Link protocol) │              │    ws://host:20809   │ client  │
-│ peer         │                   └──────────────┘                      └─────────┘
+┌──────────────┐   UDP multicast   ┌──────────────┐    WebSocket (JSON)     ┌─────────┐
+│ Ableton Live │ <──────────────>  │    Bridge     │ <────────────────────> │ Browser │
+│ or any Link  │   (Link protocol) │              │  ws://127.0.0.1:20809   │ client  │
+│ peer         │                   └──────────────┘                         └─────────┘
 └──────────────┘                         │
                                          ├──> client 1
                                          ├──> client 2
@@ -23,21 +23,34 @@ The reference implementation is the Electron/TypeScript bridge in this repositor
 
 The bridge:
 1. Joins the Ableton Link mesh as a peer (tempo, beat, phase, start/stop sync)
-2. Runs a WebSocket server on port **20809**, binding to `0.0.0.0` (all interfaces)
+2. Runs a WebSocket server on port **20809**, binding to **`127.0.0.1` (loopback only)** — the
+   bridge is never reachable from the LAN
 3. Broadcasts Link state to all connected WebSocket clients at a configurable rate
 4. Accepts commands from clients to control the Link session
 5. Relays arbitrary messages between clients
+
+### `quantum` is not a time signature
+
+Ableton Link has **no time-signature concept** — no meter, no bar count, nothing of the sort is
+transmitted between peers. A Link session exposes a tempo, a beat timeline, a `phase`, a play flag
+and a peer count. That is the whole model.
+
+`quantum` is a **phase-alignment unit measured in beats**: `phase` is the position within the
+current quantum, in `[0, quantum)`. It *defaults* to 4, which makes it look like "beats per bar" —
+but it is neither an integer by contract nor a musical meter. A conforming implementation must
+treat `quantum` as a live float read from the session, never as a hardcoded 4, and must not derive
+a time signature from it.
 
 ---
 
 ## 2. Configuration
 
-| Parameter    | Type   | Default | Description                              |
-|-------------|--------|---------|------------------------------------------|
-| `port`      | int    | 20809   | WebSocket server port                    |
-| `defaultBpm`| float  | 120     | Initial tempo when no Link peers exist   |
-| `quantum`   | int    | 4       | Musical quantum (beats per bar)          |
-| `stateHz`   | int    | 20      | State broadcast frequency (times/second) |
+| Parameter    | Type   | Default | Description                                           |
+|-------------|--------|---------|-------------------------------------------------------|
+| `port`      | int    | 20809   | WebSocket server port (bound to `127.0.0.1`)          |
+| `defaultBpm`| float  | 120     | Initial tempo when no Link peers exist                |
+| `quantum`   | float  | 4       | Phase-alignment unit, in beats — **not** a time signature |
+| `stateHz`   | int    | 100     | State broadcast frequency (times/second)              |
 
 ---
 
@@ -60,6 +73,8 @@ Sent immediately when a client connects. Contains a full state snapshot.
   "numPeers": 1,
   "numClients": 2,
   "nextBar0Delay": 345.67,
+  "linkEnabled": true,
+  "anchorTime": 60807.849,
   "measuredOutputLatency": 21.3,
   "latencyMethod": "alsa-delay(max=2048/48000@card0/pcm0p/sub0)",
   "latencyDiagnostics": "alsa-delay: device=card0/pcm0p/sub0 rate=48000 samples=20 min=1024(21.3ms) max=2048(42.7ms)",
@@ -72,11 +87,13 @@ Sent immediately when a client connects. Contains a full state snapshot.
 | `tempo`        | float   | Current tempo in BPM, rounded to 2 decimal places        |
 | `isPlaying`    | boolean | Link transport state                                     |
 | `beat`         | float   | Current beat position on the Link timeline               |
-| `phase`        | float   | Position within the current bar (0 to quantum)           |
-| `quantum`      | int     | Beats per bar                                            |
+| `phase`        | float   | Position within the current quantum, in `[0, quantum)`   |
+| `quantum`      | float   | Phase-alignment unit, in beats (see §1) — **not** a time signature |
+| `linkEnabled`  | boolean | Whether the bridge's Link session is enabled (from Link's own `isEnabled()`). `false` means the bridge is up but not on the mesh — no sync. |
+| `anchorTime`   | float?  | Link-clock time (seconds) of `beat`, captured in the same atomic session-state snapshot. Clients extrapolate `beatAtTime` from the `(beat, anchorTime)` pair rather than from a bare BPM. Omitted only when no Link session exists. |
 | `numPeers`     | int     | Number of Link peers (excluding self)                    |
 | `numClients`   | int     | Number of connected WebSocket clients (including this one)|
-| `nextBar0Delay`| float   | Milliseconds until the next bar boundary (beat 0 of bar) |
+| `nextBar0Delay`| float   | Milliseconds until the next quantum boundary (phase 0). The field name is legacy — see §5. |
 | `measuredOutputLatency` | float? | Optional. Native OS audio output latency in milliseconds, measured by the bridge. See §5.2. Omitted if measurement is unavailable (unsupported platform, measurement failed). |
 | `latencyMethod` | string | Compact description of the measurement method used, e.g. `alsa-delay(max=2048/48000@card0/pcm0p/sub0)`. Set to `"none"` when measurement is unavailable. |
 | `latencyDiagnostics` | string? | Optional. Detailed diagnostic string for the latency measurement. Present only when `measuredOutputLatency` is present. Intended for remote debugging — clients may log it but should not parse it. |
@@ -88,7 +105,7 @@ Sent immediately when a client connects. Contains a full state snapshot.
 
 ### 3.2 `state` — periodic broadcast
 
-Sent to all clients at `stateHz` frequency (default: every 50ms).
+Sent to all clients at `stateHz` frequency (default: 100 Hz, i.e. every 10 ms).
 
 ```json
 {
@@ -101,6 +118,8 @@ Sent to all clients at `stateHz` frequency (default: every 50ms).
   "numPeers": 1,
   "numClients": 3,
   "nextBar0Delay": 345.67,
+  "linkEnabled": true,
+  "anchorTime": 60807.849,
   "measuredOutputLatency": 21.3,
   "latencyMethod": "alsa-delay(max=2048/48000@card0/pcm0p/sub0)",
   "latencyDiagnostics": "alsa-delay: device=card0/pcm0p/sub0 rate=48000 samples=20 min=1024(21.3ms) max=2048(42.7ms)",
@@ -225,7 +244,7 @@ Stop the Link transport.
 
 ### 4.4 `request-quantized-start`
 
-Request playback to start aligned to a bar boundary (beat 0). Sets beat to 0 at
+Request playback to start aligned to a quantum boundary (phase 0). Sets beat to 0 at
 the start-playing time, then starts transport.
 
 ```json
@@ -234,7 +253,7 @@ the start-playing time, then starts transport.
 
 | Field     | Type  | Required | Description                              |
 |-----------|-------|----------|------------------------------------------|
-| `quantum` | int   | No       | Override quantum for alignment (defaults to bridge config) |
+| `quantum` | float | No       | Override the phase-alignment unit, in beats (defaults to bridge config) |
 
 ### 4.5 `force-beat-at-time`
 
@@ -290,7 +309,11 @@ represents the primary session's loop position.
 
 ### `nextBar0Delay`
 
-Milliseconds until the next bar-0 boundary on the Link timeline.
+Milliseconds until the next **quantum boundary** (phase 0) on the Link timeline.
+
+> The name is legacy and misleading: Link has no bars (§1). It is kept because it is part of the
+> shipped wire contract, which both the bridge and its clients depend on. Read it as
+> `nextPhase0Delay`.
 
 ```
 remainingBeats = quantum - phase
@@ -298,9 +321,9 @@ msPerBeat      = 60000 / tempo
 nextBar0Delay  = remainingBeats * msPerBeat
 ```
 
-This allows clients to schedule events aligned to bar boundaries without
+This allows clients to schedule events aligned to the session's quantum boundaries without
 needing direct Link access. A client can `setTimeout(callback, nextBar0Delay)`
-to fire at the start of the next bar.
+to fire at the start of the next quantum.
 
 ### `measuredOutputLatency`
 
@@ -377,7 +400,7 @@ before sending.
 | `set-tempo`               | Change Link tempo                          | `tempo` (float > 0), optional `atTime` |
 | `play`                    | Start transport                            | (none)                   |
 | `stop`                    | Stop transport                             | (none)                   |
-| `request-quantized-start` | Start aligned to bar boundary              | optional `quantum`       |
+| `request-quantized-start` | Start aligned to a quantum boundary        | optional `quantum`       |
 | `force-beat-at-time`      | Force beat alignment                       | `beat`, `time`, `quantum`|
 | `relay`                   | Forward to other clients                   | `payload` (object)       |
 | `loop-beat`               | Report loop position                       | `beat` (float)           |

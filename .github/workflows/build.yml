@@ -15,9 +15,9 @@ jobs:
           - os: ubuntu-latest
             targets: '@electron-forge/maker-deb,@electron-forge/maker-rpm,@electron-forge/maker-zip'
           - os: macos-latest
-            targets: '@electron-forge/maker-zip'
+            targets: '@electron-forge/maker-dmg,@electron-forge/maker-zip'
           - os: macos-15-intel
-            targets: '@electron-forge/maker-zip'
+            targets: '@electron-forge/maker-dmg,@electron-forge/maker-zip'
           - os: windows-latest
             targets: '@electron-forge/maker-squirrel,@electron-forge/maker-zip'
 

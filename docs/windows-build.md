@@ -41,7 +41,7 @@ without modifying the registry. Squirrel is the recommended end-user path.
    is installed, Bonjour is already there. Otherwise install Apple's standalone
    "Bonjour Print Services for Windows."
 
-3. **Verify audio latency measurement** — open the tray icon → Copy Logs. Look for:
+3. **Verify audio latency measurement** — right-click the tray icon → Copy Diagnostics. Look for:
 
    ```
    [Bridge] Audio latency: platform=win32 measuredOutputLatency=21.3ms method=wasapi(period=10.00ms×2@48000Hz)
@@ -49,7 +49,7 @@ without modifying the registry. Squirrel is the recommended end-user path.
 
    Healthy ranges: 20–40 ms on internal speakers / wired output, 100–300 ms on
    Bluetooth. If you see `measurement failed` or values outside those ranges, file
-   an issue with the full Copy Logs output.
+   an issue with the full Copy Diagnostics output.
 
 ## Architecture decisions captured at build time
 
@@ -121,9 +121,14 @@ on a function that fits in 100 lines. All locals are hoisted before the first
 
 The portable `.zip` exists for testing without installing — unzip, run, no
 registry modifications, no SmartScreen "is this app trusted?" trail. Squirrel is
-the recommended end-user path because it handles updates and start-menu
-integration. The portable build is also useful for users on locked-down corporate
-machines where they can't run installers.
+the recommended end-user path because it gives start-menu integration. The
+portable build is also useful for users on locked-down corporate machines where
+they can't run installers.
+
+> **The app does NOT auto-update.** An earlier version of this page claimed
+> Squirrel "handles updates". It does not, as shipped: no updater is wired up at
+> all (no `electron-updater`, no update feed). Users update by downloading a new
+> build. Auto-update also requires code signing, which is not yet in place.
 
 ## Flagged uncertainties (need real-hardware calibration)
 

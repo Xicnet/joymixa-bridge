@@ -6,14 +6,26 @@ happens against artifacts produced by CI.
 
 Two macOS slices are built, one per architecture, from two matrix entries:
 
-| Matrix `os` | Runner arch | Artifact | Runs on |
-|-------------|-------------|----------|---------|
-| `macos-latest` | arm64 (Apple Silicon) | `Joymixa Bridge-darwin-arm64-X.Y.Z.zip` | M-series Macs |
-| `macos-15-intel` | x64 (Intel) | `Joymixa Bridge-darwin-x64-X.Y.Z.zip` | 2017–2020 Intel Macs |
+| Matrix `os` | Runner arch | Artifacts | Runs on |
+|-------------|-------------|-----------|---------|
+| `macos-latest` | arm64 (Apple Silicon) | `Joymixa Bridge-darwin-arm64-X.Y.Z.dmg` + `.zip` | M-series Macs |
+| `macos-15-intel` | x64 (Intel) | `Joymixa Bridge-darwin-x64-X.Y.Z.dmg` + `.zip` | 2017–2020 Intel Macs |
 
 Both are produced natively (each runner *is* the target arch), so neither path
 cross-compiles. They are uploaded as separate artifacts (`dist-macos-latest`,
 `dist-macos-15-intel`) and both attach to the GitHub Release on a tag push.
+
+**The `.dmg` is the end-user download** — mount, drag to Applications, done. The
+`.zip` is kept alongside it because Squirrel.Mac consumes a `.zip` for
+auto-update; dropping it would foreclose that route.
+
+The DMG maker only runs on macOS (*"You can only build the DMG target on macOS
+machines"*), which is why it appears in the two macOS matrix rows and nowhere
+else. Building it on Linux fails loudly rather than silently producing nothing.
+
+> **Not yet signed or notarized.** Until a Developer ID certificate is in place,
+> macOS Gatekeeper will refuse to open the app from a normal double-click — see
+> the production-release tracker (Phase 3).
 
 ## Why an Intel build at all
 

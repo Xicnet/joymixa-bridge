@@ -2,6 +2,23 @@
 <html>
   <head>
     <meta charset="UTF-8" />
+    <!--
+      Defence in depth for the renderer. It is a local, fixed page whose every value arrives
+      over IPC: it makes no network requests of any kind (no fetch, no XHR, no WebSocket, no
+      remote font or image), so those directives are 'none' rather than 'self' — nothing can
+      be exfiltrated to, or pulled from, a remote origin even if a script were injected.
+
+      Two deliberate relaxations, both forced by the build toolchain:
+        style-src 'unsafe-inline' — webpack's style-loader injects the CSS as a <style>
+          element at runtime. Removing this needs MiniCssExtractPlugin (CSS to a real file).
+        script-src 'unsafe-eval'  — dev only (`electron-forge start`) uses eval-based source
+          maps. The packaged build does not, but a meta CSP cannot vary by environment; a
+          CSP that breaks the dev server is worse than none.
+    -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'none'; font-src 'none'; connect-src 'none'; object-src 'none'; frame-src 'none'; base-uri 'none'; form-action 'none'"
+    />
     <title>Joymixa Bridge</title>
   </head>
   <body>
@@ -14,7 +31,13 @@
       <div class="status-section">
         <div class="status-row">
           <span class="label">Link</span>
-          <span id="link-status" class="value badge badge-active">Active</span>
+          <!--
+            "Enabled"/"Disabled" is the wording Ableton's Link UI guidelines mandate — not
+            "Active"/"On". The value is written by the renderer from Link's own isEnabled();
+            the markup starts Disabled so a bridge whose Link session never came up cannot
+            render a green "Active" badge over a dead session.
+          -->
+          <span id="link-status" class="value badge badge-inactive">Disabled</span>
         </div>
         <div class="status-row">
           <span class="label">Link Peers</span>
@@ -36,19 +59,29 @@
 
       <div class="divider"></div>
 
-      <div class="beat-leds">
-        <div class="beat-led" id="beat-0"><span class="beat-num">1</span></div>
-        <div class="beat-led" id="beat-1"><span class="beat-num">2</span></div>
-        <div class="beat-led" id="beat-2"><span class="beat-num">3</span></div>
-        <div class="beat-led" id="beat-3"><span class="beat-num">4</span></div>
-      </div>
-
-      <div class="divider"></div>
-
-      <p id="ws-url" class="ws-url"></p>
-
-      <div class="footer-actions">
-        <button id="copy-logs-btn" class="copy-logs-btn">Copy Logs</button>
+      <!--
+        Phase bar. Ableton Link has no time-signature concept: it exposes a
+        `quantum` (a phase-alignment unit measured in beats) and a `phase` in
+        [0, quantum). The tick marks are therefore generated from the live
+        quantum, never hardcoded to 4 — a fixed 4-LED row silently assumes 4/4
+        and cannot represent a non-integer quantum at all.
+      -->
+      <div class="phase" id="phase">
+        <div class="phase-bar">
+          <div class="phase-fill" id="phase-fill"></div>
+          <div class="phase-ticks" id="phase-ticks"></div>
+        </div>
+        <div class="phase-meta">
+          <span class="phase-beat" id="phase-beat">1</span>
+          <span class="phase-quantum" id="phase-quantum">/ 4 beats</span>
+          <!--
+            Count-in. Ableton "strongly recommends" showing when a start will actually
+            land, so a quantized launch is not a mystery wait. Only meaningful while the
+            transport is stopped — once playing, the phase bar is a position readout, not
+            a countdown — so this is shown by the .waiting class and hidden otherwise.
+          -->
+          <span class="phase-countin" id="phase-countin"></span>
+        </div>
       </div>
     </div>
   </body>
