@@ -1,6 +1,7 @@
 import type { ForgeConfig } from '@electron-forge/shared-types';
 import { MakerSquirrel } from '@electron-forge/maker-squirrel';
 import { MakerZIP } from '@electron-forge/maker-zip';
+import { MakerDMG } from '@electron-forge/maker-dmg';
 import { MakerDeb } from '@electron-forge/maker-deb';
 import { MakerRpm } from '@electron-forge/maker-rpm';
 import { AutoUnpackNativesPlugin } from '@electron-forge/plugin-auto-unpack-natives';
@@ -131,6 +132,19 @@ const config: ForgeConfig = {
     new MakerSquirrel({
       name: 'joymixa-bridge',
     }),
+    /**
+     * The DMG is what a Mac user expects to download: mount, drag to Applications, done.
+     * Until now macOS shipped only a .zip, which unpacks a bare .app into ~/Downloads with
+     * no hint that it belongs in /Applications.
+     *
+     * `@electron-forge/maker-dmg` is macOS-only — *"You can only build the DMG target on
+     * macOS machines"* — so it is scoped to darwin here and only listed in the two macOS
+     * rows of the CI matrix. The Linux and Windows jobs never invoke it.
+     *
+     * The .zip stays: Squirrel.Mac consumes a .zip for auto-update, so dropping it would
+     * foreclose that route.
+     */
+    new MakerDMG({}, ['darwin']),
     new MakerZIP({}, ['darwin', 'win32']),
     new MakerDeb({
       options: {
