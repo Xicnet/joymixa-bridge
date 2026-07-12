@@ -1,6 +1,7 @@
 import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, dialog, shell, clipboard, Notification } from 'electron';
 import * as path from 'path';
 import { Bridge } from './bridge';
+import type { BeatTick } from './ipc-types';
 
 declare const MAIN_WINDOW_WEBPACK_ENTRY: string;
 declare const MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY: string;
@@ -277,7 +278,7 @@ function startBridge(): void {
   bridge.on('tempo', () => notifyRenderer());
   bridge.on('playing', () => notifyRenderer());
   bridge.on('clients', () => notifyRenderer());
-  bridge.on('tick', (tick: { phase: number; quantum: number; beat: number }) => {
+  bridge.on('tick', (tick: BeatTick) => {
     if (statusWindow && !statusWindow.isDestroyed() && !statusWindow.webContents.isDestroyed()) {
       statusWindow.webContents.send('beat-tick', tick);
     }

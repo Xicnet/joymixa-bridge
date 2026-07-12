@@ -1,22 +1,15 @@
 import './index.css';
-
-interface BridgeAPI {
-  getState: () => Promise<any>;
-  getPort: () => Promise<number>;
-  closeWindow: () => Promise<void>;
-  onUpdate: (callback: (state: any) => void) => () => void;
-  onBeatTick: (callback: (tick: { phase: number; quantum: number; beat: number }) => void) => () => void;
-}
+import type { BridgeApi, BridgeState } from './ipc-types';
 
 declare global {
   interface Window {
-    bridge: BridgeAPI;
+    bridge: BridgeApi;
   }
 }
 
 const $ = (id: string) => document.getElementById(id)!;
 
-function updateUI(state: any): void {
+function updateUI(state: BridgeState | null): void {
   if (!state) return;
 
   // Ableton's Link UI guidelines mandate the words "Enabled"/"Disabled" for the state
