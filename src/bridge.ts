@@ -81,6 +81,51 @@ export interface BridgeState {
   linkEnabled: boolean;  // live from Link's own isEnabled(); false when the session never came up
 }
 
+/**
+ * Origins allowed to open a WebSocket to the bridge.
+ *
+ * Without this, ANY website the user happens to visit can open a socket to
+ * 127.0.0.1:20809 and drive the session — set-tempo, play, stop,
+ * force-beat-at-time, relay. WebSockets are deliberately NOT subject to the
+ * same-origin policy, so binding to loopback is no defence at all: the attacker's
+ * page runs *on the user's machine*. And the blast radius is not just the browser
+ * tab — the bridge is a Link peer, so a forced tempo change propagates to every
+ * device in the user's Link session (their Live, their hardware).
+ *
+ * `localhost` entries cover the dev server; the joymixa.com suffix covers prod
+ * plus test./dev1. staging (see src/environments/* in the joymixa repo).
+ */
+const ALLOWED_ORIGIN_HOSTS = ['joymixa.com', 'localhost', '127.0.0.1'];
+
+/**
+ * Is this handshake's Origin allowed?
+ *
+ * A browser always sends `Origin` on a WebSocket handshake and a page CANNOT forge
+ * it — which is exactly what makes this check work against the threat above.
+ *
+ * A *missing* Origin means the client is not a browser (curl, a native app, our own
+ * `tools/cdp/*.mjs` Link-peer harnesses). Those are allowed through: a local process
+ * can forge any header it likes, so rejecting them buys no security whatsoever, while
+ * breaking the test harness. This is an anti-CSRF control, NOT authentication — do not
+ * mistake it for one.
+ */
+export function isOriginAllowed(origin: string | undefined): boolean {
+  if (!origin) return true; // not a browser — see above
+
+  let hostname: string;
+  try {
+    ({ hostname } = new URL(origin));
+  } catch {
+    return false; // unparseable Origin — a browser never sends one
+  }
+
+  // Suffix match on the *parsed hostname*, never on the raw string: a substring test
+  // would happily accept `https://joymixa.com.evil.com`.
+  return ALLOWED_ORIGIN_HOSTS.some(
+    (host) => hostname === host || hostname.endsWith(`.${host}`),
+  );
+}
+
 const DEFAULT_CONFIG: BridgeConfig = {
   port: 20809,
   defaultBpm: 120,
@@ -678,7 +723,18 @@ export class Bridge extends EventEmitter {
     // WebSocket server — loopback only. The browser always connects over
     // ws://127.0.0.1; HTTPS pages can't reach a LAN-IP ws:// (mixed content),
     // so binding all interfaces would only expose the port, never serve a client.
-    this.wss = new WebSocketServer({ host: '127.0.0.1', port: this.config.port });
+    this.wss = new WebSocketServer({
+      host: '127.0.0.1',
+      port: this.config.port,
+      // Reject cross-origin pages before the handshake completes (ws aborts with 401).
+      // Logged, not silent: "the Bridge won't connect" is otherwise unexplainable to a
+      // user running the app from an origin we don't ship.
+      verifyClient: ({ origin }: { origin?: string }) => {
+        if (isOriginAllowed(origin)) return true;
+        this.warn(`[bridge] rejected WebSocket handshake from disallowed origin: ${origin}`);
+        return false;
+      },
+    });
 
     // A listen failure (EADDRINUSE when a second instance or another app holds
     // the port) arrives as an async 'error' event, not a constructor throw. With
