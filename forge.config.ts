@@ -18,6 +18,26 @@ import { preloadConfig } from './webpack.preload.config';
 // Native modules that webpack externalizes — must be copied into the package
 const NATIVE_MODULES = ['@xicnet/abletonlink', 'coreaudio-latency', 'wasapi-latency', 'bindings', 'file-uri-to-path', 'node-addon-api'];
 
+/**
+ * Build-time debris that must not ship. At runtime the native modules need only
+ * their JS entry, package.json and build/Release/*.node (that is the full search
+ * path `bindings` uses here). Everything below is compile-time input or output:
+ * the Ableton Link C++ SDK tree (24 MB of sources + asio docs), the addon C++
+ * sources, and gyp's intermediate objects (obj.target holds a duplicate .node).
+ * GPL source obligations are met by the About-box source offer, not by shipping
+ * sources inside the binary.
+ */
+const NATIVE_MODULE_PRUNE = [
+  '@xicnet/abletonlink/link',
+  '@xicnet/abletonlink/src',
+  '@xicnet/abletonlink/build/Release/obj.target',
+  '@xicnet/abletonlink/build/Release/.deps',
+  'coreaudio-latency/build/Release/obj.target',
+  'coreaudio-latency/build/Release/.deps',
+  'wasapi-latency/build/Release/obj.target',
+  'wasapi-latency/build/Release/.deps',
+];
+
 function copyNativeModules(buildPath: string): void {
   const srcNodeModules = path.resolve(__dirname, 'node_modules');
   const destNodeModules = path.join(buildPath, 'node_modules');
@@ -28,6 +48,9 @@ function copyNativeModules(buildPath: string): void {
     if (fs.existsSync(srcDir)) {
       fs.cpSync(srcDir, destDir, { recursive: true });
     }
+  }
+  for (const rel of NATIVE_MODULE_PRUNE) {
+    fs.rmSync(path.join(destNodeModules, rel), { recursive: true, force: true });
   }
 }
 
