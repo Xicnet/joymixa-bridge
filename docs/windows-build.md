@@ -125,10 +125,12 @@ the recommended end-user path because it gives start-menu integration. The
 portable build is also useful for users on locked-down corporate machines where
 they can't run installers.
 
-> **The app does NOT auto-update.** An earlier version of this page claimed
-> Squirrel "handles updates". It does not, as shipped: no updater is wired up at
-> all (no `electron-updater`, no update feed). Users update by downloading a new
-> build. Auto-update also requires code signing, which is not yet in place.
+> **Auto-update: wired since v1.9.0** via `update-electron-app` +
+> update.electronjs.org, which serves Squirrel.Windows the `RELEASES` + `.nupkg`
+> assets CI already publishes to GitHub Releases. The Windows build itself is
+> still unsigned (SmartScreen warnings apply to the *first* install; see the
+> signing research). Installs older than v1.9.0 contain no updater and must be
+> updated by downloading a new build once.
 
 ## Flagged uncertainties (need real-hardware calibration)
 

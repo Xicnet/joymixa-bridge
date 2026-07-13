@@ -59,6 +59,7 @@
     "@xicnet/abletonlink": "git+https://github.com/Xicnet/ableton-link.git#c171c4d93d87087e69275186a55202258bef4f9e",
     "coreaudio-latency": "file:native/coreaudio-latency",
     "electron-squirrel-startup": "^1.0.1",
+    "update-electron-app": "^3.3.0",
     "wasapi-latency": "file:native/wasapi-latency",
     "ws": "^8.19.0"
   }
