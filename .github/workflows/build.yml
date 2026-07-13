@@ -39,8 +39,13 @@ jobs:
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y dpkg fakeroot rpm libavahi-compat-libdnssd-dev
 
+      # Retry once on failure, clearing the yarn cache in between: a corrupt tarball
+      # download (v1.9.0's Windows leg: "tar content ... appears to be corrupt" on a
+      # transitive dep) persists in the runner's yarn cache, so a plain retry would
+      # re-fail on the same bad entry. yarn v1 does not retry corrupt extractions.
       - name: Install dependencies
-        run: yarn install --frozen-lockfile
+        shell: bash
+        run: yarn install --frozen-lockfile || { yarn cache clean; yarn install --frozen-lockfile; }
 
       - name: Rebuild native addon for Electron
         run: yarn rebuild
