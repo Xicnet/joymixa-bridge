@@ -56,8 +56,35 @@ function placeLicenses(finalPath: string): void {
   );
 }
 
+/**
+ * macOS signing + notarization — active only when the CI signing env is present.
+ *
+ * The gate keeps every other context working unsigned: local dev builds (no cert
+ * in any keychain), Linux/Windows CI rows, and forks without the repo secrets.
+ * When active:
+ *   - `osxSign: {}` — @electron/osx-sign defaults are correct for this app: it
+ *     discovers the Developer ID identity in the keychain, signs the unpacked
+ *     `.node` addons automatically, and enables the hardened runtime. No extra
+ *     entitlements are needed (no JIT-restricted code beyond Electron's own
+ *     defaults; the multicast entitlement is iOS-only and does not exist on macOS).
+ *   - `osxNotarize` — notarytool via Apple ID + app-specific password; stapling
+ *     is automatic.
+ */
+const macSigning =
+  process.env.APPLE_ID && process.env.APPLE_APP_SPECIFIC_PASSWORD && process.env.APPLE_TEAM_ID
+    ? {
+        osxSign: {},
+        osxNotarize: {
+          appleId: process.env.APPLE_ID,
+          appleIdPassword: process.env.APPLE_APP_SPECIFIC_PASSWORD,
+          teamId: process.env.APPLE_TEAM_ID,
+        },
+      }
+    : {};
+
 const config: ForgeConfig = {
   packagerConfig: {
+    ...macSigning,
     asar: {
       unpack: '**/node_modules/{@xicnet/abletonlink,coreaudio-latency,wasapi-latency,bindings,file-uri-to-path,node-addon-api}/**',
     },
