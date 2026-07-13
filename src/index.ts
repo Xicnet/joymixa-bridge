@@ -1,4 +1,4 @@
-import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, dialog, shell, clipboard, Notification, screen } from 'electron';
+import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, nativeTheme, dialog, shell, clipboard, Notification, screen } from 'electron';
 import * as path from 'path';
 import { Bridge } from './bridge';
 import type { BeatTick } from './ipc-types';
@@ -31,7 +31,7 @@ function createTrayIcon(): Electron.NativeImage {
   // Fallback: inline SVG
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 512 512">
     <rect width="512" height="512" rx="80" fill="#ffffff"/>
-    <circle cx="256" cy="256" r="200" fill="#1a1a2e"/>
+    <circle cx="256" cy="256" r="200" fill="#000000"/>
   </svg>`;
   return nativeImage.createFromDataURL(`data:image/svg+xml;base64,${Buffer.from(svg).toString('base64')}`);
 }
@@ -112,7 +112,9 @@ function createStatusWindow(): void {
     transparent: false,
     alwaysOnTop: true,
     show: false,
-    backgroundColor: '#1a1a2e',
+    // Pre-paint color while the page loads. Must match --bg in index.css (the
+    // Joymixa theme tokens) for the active OS theme, or light mode flashes dark.
+    backgroundColor: nativeTheme.shouldUseDarkColors ? '#222222' : '#eeeeee',
     webPreferences: {
       preload: MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY,
       contextIsolation: true,

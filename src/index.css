@@ -1,15 +1,78 @@
+/*
+ * Palette copied from the Joymixa frontend design tokens
+ * (joymixa repo: src/design-tokens/tokens.json + themes/{dark,light}.json) so the
+ * companion app reads as the same product. Copied, not imported — this repo has no
+ * build coupling to the frontend and the renderer's CSP forbids remote resources.
+ * Every text/background and fill/track pairing below was checked against WCAG AA
+ * (4.5:1 text, 3:1 non-text) in BOTH themes; keep that property when changing values.
+ *
+ * Deviations from the frontend themes, both forced by contrast:
+ *   --success (light) is green.phosphorDeep #006600 — the light theme's own
+ *     accentSuccess (green.darker #35ca2a) is 1.9:1 on the light background.
+ *   --waiting is the muted-grey ramp (grey.4 dark / grey.2 light), not a bespoke
+ *     dim hue: "muted" is expressed by desaturation, never by dropping below 3:1.
+ *
+ * Chrome and typography mirror the in-game settings panel (the product's panel
+ * idiom, quake-panel.component.css): a 1px accent border on the panel edge —
+ * which is also what keeps this frameless window from dissolving into a dark
+ * desktop — and uppercase semibold setting labels in --fg-secondary (the dark
+ * theme's beige), matching .setting-name.
+ */
+
+:root {
+  /* dark — default, greys from the game's dark theme (themes/dark.json).
+     Deliberately NOT the game's true-black background: a floating tray panel
+     needs to separate from dark desktops, so it sits on grey.0 instead. */
+  --bg: #222222; /* grey.0 (semantic.background.secondary) */
+  --bg-titlebar: #161616; /* grey.charcoal */
+  --track: #333333; /* base.backgroundElevated (grey.1) */
+  --fg: #ececec; /* base.foreground */
+  --fg-secondary: #efd5c1; /* semantic.text.secondary (brand.beige) */
+  --fg-muted: #999999; /* base.foregroundMuted (grey.4) */
+  --border: #5a5a5a; /* base.borderDefault */
+  --accent: #ff2d7a; /* base.accent */
+  --success: #68ff5a; /* base.accentSuccess (green.default) */
+  --danger: #e6837c; /* brand.salmon — red.default is 4.1:1 on grey.0, fails AA */
+  --waiting: #999999; /* grey.4 — 4.4:1 vs --track */
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    /* light (themes/light.json) */
+    --bg: #eeeeee; /* base.background (grey.7) */
+    --bg-titlebar: #ffffff; /* base.backgroundElevated (white.pure) */
+    --track: #bbbbbb; /* base.backgroundSurface (grey.5) */
+    --fg: #333333; /* base.foreground (grey.1) */
+    --fg-secondary: #555555; /* semantic.text.secondary (grey.2) */
+    --fg-muted: #666666; /* base.foregroundMuted (grey.midDark) */
+    --border: #333333; /* base.borderDefault (grey.1) */
+    --accent: #b6006f; /* base.accent (fucsia.dark) */
+    --success: #006600; /* green.phosphorDeep — see header note */
+    --danger: #880000; /* base.accentDanger (red.dark) */
+    --waiting: #555555; /* grey.2 — 3.9:1 vs --track */
+  }
+}
+
 * {
   margin: 0;
   padding: 0;
   box-sizing: border-box;
 }
 
+html,
+body {
+  height: 100%;
+}
+
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  background: #1a1a2e;
-  color: #e0e0e0;
+  background: var(--bg);
+  color: var(--fg);
   user-select: none;
   overflow: hidden;
+  /* Panel edge — keeps this frameless window visible against a desktop the
+     same shade as --bg. */
+  border: 1px solid var(--border);
 }
 
 .titlebar {
@@ -18,21 +81,23 @@ body {
   justify-content: space-between;
   padding: 10px 14px;
   -webkit-app-region: drag;
-  background: #16213e;
+  background: var(--bg-titlebar);
 }
 
+/* Section-header idiom from the game's settings panel (.qp-section-name). */
 .titlebar .title {
-  font-size: 13px;
-  font-weight: 600;
-  color: #a0a0c0;
-  letter-spacing: 0.5px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--fg);
+  text-transform: uppercase;
+  letter-spacing: 0.35em;
 }
 
 #close-btn {
   -webkit-app-region: no-drag;
   background: none;
   border: none;
-  color: #606080;
+  color: var(--fg-muted);
   font-size: 18px;
   cursor: pointer;
   padding: 0 4px;
@@ -40,7 +105,7 @@ body {
 }
 
 #close-btn:hover {
-  color: #ff6b6b;
+  color: var(--danger);
 }
 
 .content {
@@ -60,17 +125,19 @@ body {
   padding: 6px 0;
 }
 
+/* Setting-label idiom from the game's settings panel (.setting-name). */
 .label {
   font-size: 12px;
-  color: #808090;
+  font-weight: 600;
+  color: var(--fg-secondary);
   text-transform: uppercase;
-  letter-spacing: 0.8px;
+  letter-spacing: 0.06em;
 }
 
 .value {
   font-size: 14px;
   font-weight: 500;
-  color: #e0e0f0;
+  color: var(--fg);
 }
 
 .badge {
@@ -81,18 +148,18 @@ body {
 }
 
 .badge-active {
-  background: rgba(0, 210, 106, 0.15);
-  color: #00d26a;
+  background: color-mix(in srgb, var(--success) 15%, transparent);
+  color: var(--success);
 }
 
 .badge-inactive {
-  background: rgba(255, 107, 107, 0.15);
-  color: #ff6b6b;
+  background: color-mix(in srgb, var(--danger) 15%, transparent);
+  color: var(--danger);
 }
 
 .divider {
   height: 1px;
-  background: #2a2a4a;
+  background: var(--border);
   margin: 16px 0;
 }
 
@@ -106,7 +173,7 @@ body {
   position: relative;
   height: 10px;
   border-radius: 5px;
-  background: #252540;
+  background: var(--track);
   overflow: hidden;
 }
 
@@ -114,7 +181,7 @@ body {
   position: absolute;
   inset: 0;
   border-radius: 5px;
-  background: #ff1493;
+  background: var(--accent);
   transform: scaleX(0);
   transform-origin: left center;
   /* No transition: this is driven per-frame from the Link phase. A transition
@@ -123,13 +190,13 @@ body {
 }
 
 .phase.downbeat .phase-fill {
-  background: #00d26a;
+  background: var(--success);
 }
 
 /* While stopped, the bar reads as a count-in to the next quantum boundary
    rather than a live position — mute it so it doesn't imply playback. */
 .phase.waiting .phase-fill {
-  background: #3a3a5a;
+  background: var(--waiting);
 }
 
 .phase-ticks {
@@ -143,7 +210,7 @@ body {
   top: 0;
   bottom: 0;
   width: 1px;
-  background: #1a1a2e;
+  background: var(--bg);
 }
 
 .phase-meta {
@@ -157,17 +224,17 @@ body {
 .phase-beat {
   font-size: 15px;
   font-weight: 700;
-  color: #e0e0f0;
+  color: var(--fg);
   font-variant-numeric: tabular-nums;
 }
 
 .phase.waiting .phase-beat {
-  color: #606080;
+  color: var(--fg-muted);
 }
 
 .phase-quantum {
   font-size: 11px;
-  color: #606080;
+  color: var(--fg-muted);
   letter-spacing: 0.5px;
 }
 
@@ -176,7 +243,7 @@ body {
    jittering as the digits tick down. */
 .phase-countin {
   font-size: 11px;
-  color: #8080a0;
+  color: var(--fg-muted);
   font-variant-numeric: tabular-nums;
   margin-left: 6px;
 }
@@ -184,5 +251,5 @@ body {
 .phase-countin:not(:empty)::before {
   content: '·';
   margin-right: 6px;
-  color: #404060;
+  color: var(--border);
 }
