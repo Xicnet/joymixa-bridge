@@ -1,5 +1,21 @@
 # Changelog
 
+## 1.9.0 — 2026-07-13
+
+### Added
+- Auto-update on macOS and Windows via GitHub Releases (update-electron-app).
+  Installs of 1.8.x and older contain no updater — download this release manually
+  once; updates are automatic from here on. Linux updates via the distro package.
+
+### Changed
+- Packages no longer ship the Ableton Link C++ SDK sources and compiler
+  intermediates (~25 MB of build-time debris removed from every platform).
+
+### Removed
+- The numeric "starts in Ns" count-in line. The phase bar already animates the
+  count-in to the next quantum boundary, which is the indication Ableton's
+  guidelines recommend.
+
 ## 1.8.0 — 2026-07-13
 
 ### Added
