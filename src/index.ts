@@ -19,14 +19,23 @@ const APP_HOMEPAGE = 'https://joymixa.com';
 const APP_REPO = 'https://github.com/Xicnet/joymixa-bridge';
 
 function createTrayIcon(): Electron.NativeImage {
+  // macOS wants a Template image: the glyph in pure black + alpha, no tile. The OS
+  // then recolors it for light/dark menu bars and the highlighted state. Electron
+  // marks it as a template automatically from the "Template" filename suffix, and
+  // picks up the @2x variant beside it for retina.
+  const fileNames = process.platform === 'darwin'
+    ? ['tray-iconTemplate.png', 'tray-icon.png']
+    : ['tray-icon.png'];
   // Try file-based PNG first (works reliably on Linux/i3bar)
-  const iconPaths = [
-    path.join(__dirname, '..', '..', 'assets', 'tray-icon.png'),  // dev
-    path.join(process.resourcesPath || '', 'tray-icon.png'),       // packaged
-  ];
-  for (const p of iconPaths) {
-    const img = nativeImage.createFromPath(p);
-    if (!img.isEmpty()) return img;
+  for (const name of fileNames) {
+    const iconPaths = [
+      path.join(__dirname, '..', '..', 'assets', name),  // dev
+      path.join(process.resourcesPath || '', name),       // packaged
+    ];
+    for (const p of iconPaths) {
+      const img = nativeImage.createFromPath(p);
+      if (!img.isEmpty()) return img;
+    }
   }
   // Fallback: inline SVG
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="22" height="22" viewBox="0 0 512 512">
