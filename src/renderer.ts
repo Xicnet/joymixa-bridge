@@ -9,25 +9,8 @@ declare global {
 
 const $ = (id: string) => document.getElementById(id)!;
 
-/**
- * Tempo and transport state, mirrored out of the event-driven `bridge-update` stream so the
- * per-frame render loop can reach them.
- *
- * The count-in needs tempo to turn "beats remaining" into "seconds remaining", but tempo
- * only arrives on state updates, while the countdown has to be redrawn every frame against
- * the 100 Hz phase feed. Deriving the countdown from the phase tick (rather than from the
- * state message's own `nextBar0Delay`) is what keeps it smooth: `nextBar0Delay` is only
- * recomputed when some *event* fires, so a countdown driven off it would sit frozen and
- * then jump.
- */
-let tempo = 0;
-let isPlaying = false;
-
 function updateUI(state: BridgeState | null): void {
   if (!state) return;
-
-  tempo = state.tempo;
-  isPlaying = state.isPlaying;
 
   // Ableton's Link UI guidelines mandate the words "Enabled"/"Disabled" for the state
   // readout. It was previously a hardcoded "Active" in the markup that nothing ever
@@ -91,14 +74,12 @@ function initPhaseBar(): void {
   const ticksEl = $('phase-ticks');
   const beatEl = $('phase-beat');
   const quantumEl = $('phase-quantum');
-  const countInEl = $('phase-countin');
   const phaseEl = $('phase');
 
   let phase = 0;
   let quantum = 0;
   let renderedQuantum = -1;
   let renderedBeat = -1;
-  let renderedCountIn = '';
 
   window.bridge.onBeatTick((tick) => {
     phase = tick.phase;
@@ -135,15 +116,6 @@ function initPhaseBar(): void {
         beatEl.textContent = String(beat);
         phaseEl.classList.toggle('downbeat', beat === 1);
       }
-
-      // Count-in: how long until a quantized start would actually land. Derived from the
-      // live phase rather than the state message's nextBar0Delay, which is only recomputed
-      // on an event and would leave the countdown frozen between updates.
-      const countIn = isPlaying ? '' : formatCountIn(quantum - phase, tempo);
-      if (countIn !== renderedCountIn) {
-        renderedCountIn = countIn;
-        countInEl.textContent = countIn;
-      }
     }
     requestAnimationFrame(render);
   };
@@ -153,22 +125,6 @@ function initPhaseBar(): void {
 /** Trim the trailing zeros a non-integer quantum would otherwise show (3.5, not 3.50). */
 function formatQuantum(quantum: number): string {
   return Number.isInteger(quantum) ? String(quantum) : String(Number(quantum.toFixed(2)));
-}
-
-/**
- * "starts in 1.4s" — the wait before a quantized launch lands on the next quantum boundary.
- *
- * Shown in seconds, not beats: the point is to answer "how long am I waiting", and a beat
- * count means nothing without doing the tempo arithmetic in your head. Rendered to one
- * decimal so it visibly counts down rather than sitting on an integer for most of a beat.
- *
- * Guards tempo <= 0: it is 0 until the first state message arrives, and dividing by it
- * would print "Infinity".
- */
-function formatCountIn(remainingBeats: number, bpm: number): string {
-  if (bpm <= 0 || remainingBeats <= 0) return '';
-  const seconds = remainingBeats * (60 / bpm);
-  return `starts in ${seconds.toFixed(1)}s`;
 }
 
 init();

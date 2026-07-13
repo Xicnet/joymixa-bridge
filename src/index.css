@@ -237,19 +237,3 @@ body {
   color: var(--fg-muted);
   letter-spacing: 0.5px;
 }
-
-/* Count-in — only rendered while stopped (the renderer writes an empty string once
-   playing), so it needs no visibility rule of its own. tabular-nums stops the row
-   jittering as the digits tick down. */
-.phase-countin {
-  font-size: 11px;
-  color: var(--fg-muted);
-  font-variant-numeric: tabular-nums;
-  margin-left: 6px;
-}
-
-.phase-countin:not(:empty)::before {
-  content: '·';
-  margin-right: 6px;
-  color: var(--border);
-}
