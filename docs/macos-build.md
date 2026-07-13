@@ -16,8 +16,9 @@ cross-compiles. They are uploaded as separate artifacts (`dist-macos-latest`,
 `dist-macos-15-intel`) and both attach to the GitHub Release on a tag push.
 
 **The `.dmg` is the end-user download** — mount, drag to Applications, done. The
-`.zip` is kept alongside it because Squirrel.Mac consumes a `.zip` for
-auto-update; dropping it would foreclose that route.
+`.zip` is what Squirrel.Mac consumes for auto-update (wired since v1.9.0 via
+`update-electron-app`; requires the signed build, in place since v1.8.1) — do
+not drop it from the matrix.
 
 The DMG maker only runs on macOS (*"You can only build the DMG target on macOS
 machines"*), which is why it appears in the two macOS matrix rows and nowhere

@@ -1,5 +1,6 @@
 import { app, BrowserWindow, Tray, Menu, ipcMain, nativeImage, nativeTheme, dialog, shell, clipboard, Notification, screen } from 'electron';
 import * as path from 'path';
+import { updateElectronApp } from 'update-electron-app';
 import { Bridge } from './bridge';
 import type { BeatTick } from './ipc-types';
 
@@ -9,6 +10,20 @@ declare const MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY: string;
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (require('electron-squirrel-startup')) {
   app.quit();
+}
+
+/**
+ * Auto-update from GitHub Releases via update.electronjs.org.
+ *
+ * Platform gate is ours, not the library's: update-electron-app supports only
+ * Squirrel.Mac (consumes the released .zip; requires the build to be signed —
+ * true since v1.8.1) and Squirrel.Windows (consumes RELEASES + .nupkg, which CI
+ * already publishes). Linux updates through the distro package, so it is
+ * excluded rather than left to the library to reject. `isPackaged` keeps dev
+ * runs quiet.
+ */
+if (app.isPackaged && (process.platform === 'darwin' || process.platform === 'win32')) {
+  updateElectronApp();
 }
 
 let tray: Tray | null = null;
