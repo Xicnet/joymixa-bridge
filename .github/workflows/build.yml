@@ -18,7 +18,12 @@ jobs:
             targets: '@electron-forge/maker-dmg,@electron-forge/maker-zip'
           - os: macos-15-intel
             targets: '@electron-forge/maker-dmg,@electron-forge/maker-zip'
-          - os: windows-latest
+          # Pinned: windows-latest moved to Visual Studio 2026 (v18) in June 2026, which
+          # node-gyp cannot detect yet (nodejs/node-gyp#3282) — the native Link addon
+          # fails to configure. windows-2022 keeps the VS2022 toolchain, per GitHub's own
+          # migration guidance (actions/runner-images#14017). Revisit when node-gyp ships
+          # VS2026 support.
+          - os: windows-2022
             targets: '@electron-forge/maker-squirrel,@electron-forge/maker-zip'
 
     runs-on: ${{ matrix.os }}
