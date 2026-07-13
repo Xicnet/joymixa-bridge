@@ -1,18 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Status-bar icon: Android renders small icons from the alpha channel only, so this
-     is the Joymixa swirl as a white silhouette (20dp glyph in the 24dp grid). Same
-     source path as ic_launcher_foreground, scaled 20 / 93.14. -->
+<!-- Adaptive-icon foreground: the Joymixa swirl from assets/icon.svg, centred in the
+     108dp canvas at 60dp — inside the 66dp safe zone, so no launcher mask clips it.
+     The glyph path is authored around centre (828.08, 484.2) with a 46.57 radius
+     (see assets/icon.svg); the nested groups recentre and scale it (60 / 93.14). -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    android:width="24dp"
-    android:height="24dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24">
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
     <group
-        android:translateX="12"
-        android:translateY="12">
+        android:translateX="54"
+        android:translateY="54">
         <group
-            android:scaleX="0.2147"
-            android:scaleY="0.2147">
+            android:scaleX="0.6442"
+            android:scaleY="0.6442">
             <group
                 android:translateX="-828.08"
                 android:translateY="-484.2">
