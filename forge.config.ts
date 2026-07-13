@@ -132,7 +132,12 @@ const config: ForgeConfig = {
         'Joymixa Bridge uses your local network to find and sync with Ableton Link devices.',
     },
 
-    extraResource: ['./assets/tray-icon.png'],
+    extraResource: [
+      './assets/tray-icon.png',
+      // macOS menu-bar Template icons (black + alpha); picked on darwin in createTrayIcon()
+      './assets/tray-iconTemplate.png',
+      './assets/tray-iconTemplate@2x.png',
+    ],
     afterCopy: [
       (buildPath, _electronVersion, _platform, _arch, callback) => {
         try {
