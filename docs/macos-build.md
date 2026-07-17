@@ -24,9 +24,38 @@ The DMG maker only runs on macOS (*"You can only build the DMG target on macOS
 machines"*), which is why it appears in the two macOS matrix rows and nowhere
 else. Building it on Linux fails loudly rather than silently producing nothing.
 
-> **Not yet signed or notarized.** Until a Developer ID certificate is in place,
-> macOS Gatekeeper will refuse to open the app from a normal double-click — see
-> the production-release tracker (Phase 3).
+## Signing & notarization (since v1.8.1)
+
+Every tagged macOS build is signed with a Developer ID Application certificate,
+notarized via Apple's notary service, and has the ticket stapled — a clean
+Gatekeeper first launch, verified on real hardware against v1.9.0.
+
+How it works:
+
+- `forge.config.ts` spreads `osxSign: {}` + `osxNotarize` into `packagerConfig`
+  **only when** `APPLE_ID`, `APPLE_APP_SPECIFIC_PASSWORD` and `APPLE_TEAM_ID`
+  are all set. Local builds, Linux/Windows CI rows and forks without the
+  secrets keep building unsigned, exactly as before.
+- `@electron/osx-sign` defaults are correct for this app: it finds the identity
+  in the keychain, signs the unpacked `.node` addons, and enables the hardened
+  runtime. No extra entitlements (the multicast entitlement is iOS-only; the
+  addons don't need `allow-unsigned-executable-memory`).
+- The workflow's "Prepare macOS signing keychain" step imports the base64 `.p12`
+  (`MACOS_CERT_P12` / `MACOS_CERT_PASSWORD` repo secrets) into a throwaway
+  keychain with a random password, and deletes it in an `always()` cleanup step.
+  When the secrets are absent the step logs and skips — unsigned build, no error.
+- Notarization is Apple's automated malware scan, not a review: most
+  submissions complete in under 5 minutes (Apple's stated commitment: 98%
+  within 15). It has no per-submission cost. Stapling is automatic.
+- The certificate is valid until **2031-07-14** (5-year Developer ID, G2
+  Sub-CA). Renewal means: new CSR from the existing key (OpenSSL, no Mac
+  needed), new cert from the Apple portal, rebuild the `.p12`, update the two
+  cert secrets. Key custody is maintainer-private (not in any repo).
+
+⚠ Once signed, never repackage the `.app` with a plain `zip` — it can drop
+symlinks/permissions and genuinely corrupt the signature (Apple's tooling uses
+`ditto`). The Forge zip maker handles this correctly; the warning is for manual
+repacking.
 
 ## Why an Intel build at all
 
