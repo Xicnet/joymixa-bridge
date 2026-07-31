@@ -2,6 +2,7 @@ import { app, BrowserWindow, net, protocol, shell } from 'electron';
 import * as fs from 'fs';
 import * as path from 'path';
 import { pathToFileURL } from 'url';
+import { GAME_BUNDLE_ORIGIN } from './bridge';
 
 /**
  * Dev-mode game bundle: serves the Joymixa web app from local assets over a
@@ -21,10 +22,10 @@ import { pathToFileURL } from 'url';
  * never committed — public repo).
  */
 
-const GAME_SCHEME = 'app';
-/** Host part of the served origin; arbitrary but stable (origin = app://joymixa). */
-const GAME_HOST = 'joymixa';
-const GAME_ORIGIN = `${GAME_SCHEME}://${GAME_HOST}`;
+/** Origin the game is served from — single source of truth in bridge.ts, where the
+ *  WebSocket origin allowlist admits it. Scheme derived, never restated. */
+const GAME_ORIGIN = GAME_BUNDLE_ORIGIN;
+const GAME_SCHEME = new URL(GAME_ORIGIN).protocol.replace(/:$/, '');
 
 /** Backend the /api and /media proxies target. Staging matches `yarn build-staging-fast`
  *  game builds and the Android debug bundle. */
