@@ -84,6 +84,17 @@ class BridgeService : Service() {
         return START_STICKY
     }
 
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        // Bundle flavor: the WebView is the only client and dies with the task, so a
+        // swipe from recents is the user closing the app — stop the bridge (removing
+        // the notification and releasing the locks) instead of lingering. The
+        // bridge-only flavor serves browsers on other devices and stays up by design.
+        if (BuildConfig.INCLUDE_GAME) {
+            stopSelf()
+        }
+        super.onTaskRemoved(rootIntent)
+    }
+
     override fun onDestroy() {
         serviceScope.cancel()
         wsServer?.stop(500)
@@ -640,9 +651,12 @@ class BridgeService : Service() {
 
     private fun buildNotification(state: BridgeState): Notification {
         val transport = if (state.isPlaying) "Playing" else "Stopped"
+        // Tap target mirrors the flavor's launcher activity (bundle boots the game).
+        val launchTarget =
+            if (BuildConfig.INCLUDE_GAME) GameActivity::class.java else MainActivity::class.java
         val openIntent = PendingIntent.getActivity(
             this, 0,
-            Intent(this, MainActivity::class.java),
+            Intent(this, launchTarget),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
         return NotificationCompat.Builder(this, CHANNEL_ID)

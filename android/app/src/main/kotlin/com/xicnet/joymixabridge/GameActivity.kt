@@ -1,6 +1,9 @@
 package com.xicnet.joymixabridge
 
+import android.Manifest
 import android.annotation.SuppressLint
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.util.Log
 import android.webkit.ConsoleMessage
@@ -10,7 +13,10 @@ import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
+import androidx.activity.OnBackPressedCallback
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.webkit.WebViewAssetLoader
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
@@ -34,10 +40,41 @@ class GameActivity : AppCompatActivity() {
 
     private lateinit var webView: WebView
 
+    // Back walks the WebView history; at the root it EXITS the app — stopping the
+    // bridge service (and its notification) and finishing the activity. This
+    // deliberately overrides the Android 12+ default of backgrounding a root
+    // launcher activity: back means exit.
+    private val backCallback = object : OnBackPressedCallback(true) {
+        override fun handleOnBackPressed() {
+            if (webView.canGoBack()) {
+                webView.goBack()
+            } else {
+                stopService(BridgeService.buildIntent(this@GameActivity))
+                finish()
+            }
+        }
+    }
+
     @SuppressLint("SetJavaScriptEnabled")
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_game)
+
+        // In the bundle flavor this activity is the launcher, so it owns what
+        // MainActivity does for bridgeOnly: request the notification permission and
+        // start the bridge foreground service the WebView connects to on
+        // ws://127.0.0.1. startForegroundService is idempotent if MainActivity
+        // already started it.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS)
+                != PackageManager.PERMISSION_GRANTED) {
+                ActivityCompat.requestPermissions(this,
+                    arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1)
+            }
+        }
+        ContextCompat.startForegroundService(this, BridgeService.buildIntent(this))
+
+        onBackPressedDispatcher.addCallback(this, backCallback)
 
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
 
@@ -175,16 +212,6 @@ class GameActivity : AppCompatActivity() {
                     conn.disconnect()
                 } catch (_: Exception) { }
             }.start()
-        }
-    }
-
-    @Deprecated("Use onBackPressedDispatcher")
-    override fun onBackPressed() {
-        if (webView.canGoBack()) {
-            webView.goBack()
-        } else {
-            @Suppress("DEPRECATION")
-            super.onBackPressed()
         }
     }
 

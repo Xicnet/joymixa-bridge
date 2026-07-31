@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+
+        <!-- Launcher for the bundle flavor: boot straight into the game. Back at the
+             top of the WebView history exits the app (GameActivity's back callback
+             stops the bridge service and finishes). singleTop so notification taps and
+             launcher relaunches resume the running instance instead of stacking a
+             second WebView. -->
+        <activity
+            android:name=".GameActivity"
+            android:launchMode="singleTop"
+            android:configChanges="orientation|screenSize|keyboard|keyboardHidden"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+
+    </application>
+</manifest>
