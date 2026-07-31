@@ -235,6 +235,15 @@ const config: ForgeConfig = {
               config: preloadConfig,
             },
           },
+          // Preload-only entry: the game window renders the bundled web app itself;
+          // only the __jmNative native-shell flag is injected from our side.
+          {
+            name: 'game_window',
+            preload: {
+              js: './src/game-preload.ts',
+              config: preloadConfig,
+            },
+          },
         ],
       },
     }),

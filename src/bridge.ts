@@ -98,6 +98,15 @@ export interface BridgeState {
 const ALLOWED_ORIGIN_HOSTS = ['joymixa.com', 'localhost', '127.0.0.1'];
 
 /**
+ * The Electron game bundle's origin — game-window.ts serves the app over this
+ * privileged scheme. Declared here (not in game-window.ts) so the allowlist and
+ * the protocol handler share one source of truth without bridge.ts importing
+ * Electron. Exact-match only: a web page cannot forge an app:// Origin, so this
+ * admits precisely our own bundle window.
+ */
+export const GAME_BUNDLE_ORIGIN = 'app://joymixa';
+
+/**
  * Is this handshake's Origin allowed?
  *
  * A browser always sends `Origin` on a WebSocket handshake and a page CANNOT forge
@@ -111,6 +120,7 @@ const ALLOWED_ORIGIN_HOSTS = ['joymixa.com', 'localhost', '127.0.0.1'];
  */
 export function isOriginAllowed(origin: string | undefined): boolean {
   if (!origin) return true; // not a browser — see above
+  if (origin === GAME_BUNDLE_ORIGIN) return true; // our own Electron bundle window
 
   let hostname: string;
   try {

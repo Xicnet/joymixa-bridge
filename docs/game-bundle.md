@@ -1,6 +1,8 @@
 # Game Bundle
 
-Both native apps (Android/iOS) support a **bundle** variant that embeds a web app in a WebView alongside the bridge. This gives users a single app: Ableton Link bridge + the web app running locally.
+All three native apps (Android/iOS/Electron) support a **bundle** variant that embeds a web app in a WebView/BrowserWindow alongside the bridge. This gives users a single app: Ableton Link bridge + the web app running locally.
+
+For the Electron (desktop) bundle specifics — the `app://` protocol, main-process proxy, and dev-mode launch — see [desktop.md](desktop.md) § Game bundle.
 
 ## How it works
 
@@ -26,9 +28,10 @@ The web app's production build output (static HTML/JS/CSS/assets) is copied into
 3. Rewrites `<base href="/">` to `<base href="./">` (required for WebView relative URLs)
 4. Removes service worker files (not useful in WebView)
 
-Output locations (both gitignored):
+Output locations (all gitignored):
 - Android: `android/app/src/bundle/assets/game/`
 - iOS: `ios/LinkBridge/GameAssets/`
+- Electron: `game/` (repo root; base href stays `/` — see desktop.md)
 
 ## Build variants
 

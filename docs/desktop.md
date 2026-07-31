@@ -73,6 +73,42 @@ yarn rebuild          # runs electron-rebuild -f -w @xicnet/abletonlink
 Implements the WebSocket protocol documented in [docs/protocol.md](protocol.md).
 Port 20809 (bound to `127.0.0.1`, loopback only), JSON messages, 100Hz broadcast rate.
 
+## Game bundle (dev mode)
+
+The desktop app has a dev-mode **bundle** variant that opens the full Joymixa game in a
+BrowserWindow next to the tray bridge — the Electron sibling of the Android/iOS bundle
+variants ([game-bundle.md](game-bundle.md)).
+
+```bash
+# 1. Build the game (joymixa repo): yarn build-staging-fast
+# 2. Copy assets in:                ./scripts/copy-game-assets.sh   (→ game/)
+# 3. Launch straight into the game:
+JOYMIXA_BUNDLE=1 yarn start
+```
+
+Without `JOYMIXA_BUNDLE=1`, an "Open Joymixa" tray item appears whenever `game/` exists.
+
+How it works (`src/game-window.ts`):
+
+- The game is served from `game/` over a privileged custom scheme (`app://joymixa`,
+  declared as `GAME_BUNDLE_ORIGIN` in `src/bridge.ts`). A catch-all returns `index.html`
+  for extension-less paths, so Angular's default path routing works unchanged — no hash
+  routing, no web-app changes. The copy script keeps `<base href="/">` for this target.
+- `/api/*` and `/media/*` are forwarded to the backend by the main process (`net.fetch`),
+  so they are same-origin for the renderer: no CORS, and POST bodies survive (unlike the
+  Android WebView proxy). Backend defaults to `https://test.joymixa.com`; override with
+  `JOYMIXA_BACKEND=<url>`.
+- A preload injects `window.__jmNative = true` (the game's `PlatformService` native-shell
+  flag); the bridge WS origin allowlist admits `app://joymixa` (exact match).
+- `JOYMIXA_CDP_PORT=<port>` opens a remote-debugging endpoint for driving/verifying the
+  running bundle over CDP.
+
+Dev-mode only for now: no installer packaging (`yarn make` does not include `game/`), no
+Auth0 (guest mode), CI stays bridge-only. **Distribution is gated on the Ableton Link
+licensing decision** — see the joymixa repo,
+`docs/research/platform/electron-full-app-bundle.md` §5a (same-process vs child-process
+architecture fork).
+
 ## Build outputs
 
 `yarn make` produces platform installers via Electron Forge:

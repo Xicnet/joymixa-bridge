@@ -3,9 +3,11 @@ import * as path from 'path';
 import { updateElectronApp } from 'update-electron-app';
 import { Bridge } from './bridge';
 import type { BeatTick } from './ipc-types';
+import { initGameBundle, setupGameProtocol, createGameWindow, hasGameAssets } from './game-window';
 
 declare const MAIN_WINDOW_WEBPACK_ENTRY: string;
 declare const MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY: string;
+declare const GAME_WINDOW_PRELOAD_WEBPACK_ENTRY: string;
 
 // Handle creating/removing shortcuts on Windows when installing/uninstalling.
 if (require('electron-squirrel-startup')) {
@@ -29,6 +31,17 @@ if (app.isPackaged && (process.platform === 'darwin' || process.platform === 'wi
 let tray: Tray | null = null;
 let statusWindow: BrowserWindow | null = null;
 let bridge: Bridge | null = null;
+
+// Privileged-scheme registration and Chromium switches must land before 'ready'.
+// Unconditional: registering the app:// scheme is harmless in bridge-only mode.
+initGameBundle();
+
+/** Dev-mode game bundle: JOYMIXA_BUNDLE=1 opens the game window at launch. */
+const bundleModeRequested = process.env.JOYMIXA_BUNDLE === '1';
+
+function openGameWindow(): void {
+  createGameWindow(GAME_WINDOW_PRELOAD_WEBPACK_ENTRY);
+}
 
 const APP_HOMEPAGE = 'https://joymixa.com';
 const APP_REPO = 'https://github.com/Xicnet/joymixa-bridge';
@@ -258,6 +271,11 @@ function setupTray(): void {
   tray.setToolTip('Joymixa Bridge');
 
   const contextMenu = Menu.buildFromTemplate([
+    // Only offered when a game build has been copied in (scripts/copy-game-assets.sh) —
+    // a plain bridge install has no game assets and must not show a dead entry.
+    ...(hasGameAssets()
+      ? [{ label: 'Open Joymixa', click: () => openGameWindow() }]
+      : []),
     {
       label: 'Status Window',
       click: () => toggleStatusWindow(),
@@ -423,12 +441,18 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.on('ready', () => {
+    setupGameProtocol();
     setupIPC();
     setupTray();
     startBridge();
 
-    // Show status window on first launch
-    createStatusWindow();
+    if (bundleModeRequested && hasGameAssets()) {
+      // Bundle mode: the game IS the app — go straight to it, no status popup.
+      openGameWindow();
+    } else {
+      // Show status window on first launch
+      createStatusWindow();
+    }
   });
 }
 
