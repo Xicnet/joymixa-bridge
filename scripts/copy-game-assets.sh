@@ -13,6 +13,7 @@ fi
 
 copy_assets() {
   local dest="$1"
+  local rewrite_base="${2:-rewrite}"
   rm -rf "$dest"
   mkdir -p "$dest"
 
@@ -30,8 +31,11 @@ copy_assets() {
   # Rename CSR entry point to index.html
   mv "$dest/index.csr.html" "$dest/index.html"
 
-  # Rewrite base href for WebView (relative paths required)
-  sed -i 's|<base href="/">|<base href="./">|g' "$dest/index.html"
+  # Rewrite base href for WebView (relative paths required). The Electron target keeps
+  # base href "/" — its app:// origin serves absolute paths through a catch-all handler.
+  if [ "$rewrite_base" = "rewrite" ]; then
+    sed -i 's|<base href="/">|<base href="./">|g' "$dest/index.html"
+  fi
 
   # Remove service worker files (not useful in WebView)
   rm -f "$dest/ngsw-worker.js" "$dest/ngsw.json" \
@@ -47,5 +51,10 @@ echo "Android: $ANDROID_DEST"
 IOS_DEST="$PROJECT_ROOT/ios/LinkBridge/GameAssets"
 copy_assets "$IOS_DEST"
 echo "iOS: $IOS_DEST"
+
+# --- Electron (dev-mode bundle; served over app://, base href stays "/") ---
+ELECTRON_DEST="$PROJECT_ROOT/game"
+copy_assets "$ELECTRON_DEST" keep
+echo "Electron: $ELECTRON_DEST"
 
 echo "Done."
