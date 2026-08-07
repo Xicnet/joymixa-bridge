@@ -227,6 +227,31 @@ export class Bridge extends EventEmitter {
     this.broadcast({ type: 'tempo', tempo: newTempo, beat, phase, quantum: this.config.quantum, ts: Date.now(), anchorTime });
   }
 
+  /**
+   * Atomic (beat, timeAtBeat, tempo) snapshot at the configured quantum, taken
+   * now — the native getState() reads the Link clock and returns the pair for
+   * that instant, which makes it usable as a packet-arrival stamp (Pro DJ Link
+   * grid pinning, spec D12). Null while Link is down.
+   */
+  public getLinkGridSample(): { beat: number; timeAtBeat: number; tempo: number } | null {
+    if (!this.link) return null;
+    const { beat, timeAtBeat, tempo } = this.link.getState(this.config.quantum);
+    return { beat, timeAtBeat, tempo };
+  }
+
+  /**
+   * Grid pin for in-process sources (Pro DJ Link pinner). Mirrors the WS
+   * `force-beat-at-time` command path: log + apply; clients re-seed from the
+   * periodic state broadcasts, same as they do for the WS command (the
+   * probe-verified path).
+   */
+  public forceBeatAtTimeFromLocalSource(beat: number, time: number, sourceTag: string): void {
+    if (!this.link) return;
+    if (!isFinite(beat) || !isFinite(time)) return;
+    this.log(`[Bridge:${sourceTag}] force-beat-at-time beat=${beat.toFixed(3)} time=${time.toFixed(6)} quantum=${this.config.quantum}`);
+    this.link.forceBeatAtTime(beat, time, this.config.quantum);
+  }
+
   private pin(msg: string): void {
     const line = `${new Date().toISOString()} ${msg}`;
     this.pinnedLines.push(line);

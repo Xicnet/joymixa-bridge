@@ -4,7 +4,7 @@ import { updateElectronApp } from 'update-electron-app';
 import { Bridge } from './bridge';
 import type { BeatTick } from './ipc-types';
 import { initGameBundle, setupGameProtocol, createGameWindow, hasGameAssets } from './game-window';
-import { ProDjLinkListener, ProDjLinkStatus, MIXER_DEVICE_NUMBER } from './prodjlink';
+import { ProDjLinkListener, ProDjLinkStatus, GridPinner, MIXER_DEVICE_NUMBER } from './prodjlink';
 import { BridgeSettings, loadSettings, saveSettings } from './settings';
 
 declare const MAIN_WINDOW_WEBPACK_ENTRY: string;
@@ -374,11 +374,23 @@ function setProDjLinkOverride(deviceNumber: number | null): void {
 function setupProDjLink(): void {
   if (app.isPackaged) return;
 
-  proDjLink = new ProDjLinkListener((msg) => bridge?.logExternal(msg));
+  const log = (msg: string): void => bridge?.logExternal(msg);
+  proDjLink = new ProDjLinkListener(log);
   proDjLink.setDeviceOverride(settings.proDjLinkDeviceOverride);
   proDjLink.on('tempo', (bpm: number) => bridge?.setTempoFromLocalSource(bpm, 'prodjlink'));
   proDjLink.on('status', () => refreshTrayMenu());
   proDjLink.on('devices', () => refreshTrayMenu());
+
+  // v2 grid pinning (spec D12–D19). Dev A/B switch: JOYMIXA_PRODJLINK_NO_PIN=1
+  // runs v1 tempo-only follow for offset benching (D19).
+  if (process.env.JOYMIXA_PRODJLINK_NO_PIN === '1') {
+    log('[prodjlink] grid pinning DISABLED (JOYMIXA_PRODJLINK_NO_PIN=1) — tempo-only follow');
+  } else {
+    proDjLink.attachGridPinner(new GridPinner({
+      sample: () => bridge?.getLinkGridSample() ?? null,
+      forceBeatAtTime: (beat, time) => bridge?.forceBeatAtTimeFromLocalSource(beat, time, 'prodjlink'),
+    }, log));
+  }
 
   if (settings.proDjLinkEnabled) proDjLink.start();
 }

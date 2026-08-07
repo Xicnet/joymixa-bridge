@@ -61,6 +61,148 @@ const STATE_TICK_MS = 1000;
  *  reception diagnosis (D6). */
 const DEAF_SOCKET_HINT_AFTER_MS = 15_000;
 
+// ── v2 grid pinning (spec pro-dj-link-phase-pinning.md, D12–D19) ──
+
+/** Pro DJ Link beat-in-bar cycles 1→4: the protocol's bar is four beats. */
+const BEATS_PER_BAR = 4;
+/** D14 LOCK: hard-pin when the offset at (re)lock exceeds this. TBD-bench. */
+const SNAP_THRESHOLD_BEATS = 1 / 16;
+/** D14 TRACK: leave the grid alone below this filtered offset. TBD-bench. */
+const TRACK_DEADBAND_MS = 3;
+/** D14 TRACK: per-correction step clamp — ≈14 ms steps measured inaudible. TBD-bench. */
+const TRACK_CLAMP_MS = 10;
+/** D14 TRACK: median window; jitter is < ±2 ms so a short window suffices. TBD-bench. */
+const OFFSET_FILTER_SIZE = 4;
+/** A beat gap this long invalidates the lock (pause/CUE) — next beat re-locks (D18/D14). */
+const RELOCK_GAP_MS = SIGNAL_LOST_DEBOUNCE_MS;
+/** D15: constant trim for deck-transmit + receive-path offset. Default 0; set at bench. */
+const CALIBRATION_MS = 0;
+
+/** Link-side grid access injected by the host process. Everything is null-safe:
+ *  Link may not be up yet when beats start arriving. */
+export interface LinkGridAccess {
+  /** Atomic (beat, timeAtBeat, tempo) snapshot at the bar quantum, taken NOW —
+   *  the native getState() reads the Link clock and returns the beat/time pair
+   *  for that instant. Null while Link is down. */
+  sample(): { beat: number; timeAtBeat: number; tempo: number } | null;
+  /** Re-map `beat` to occur at Link-clock `time` (bar quantum) — D12. */
+  forceBeatAtTime(beat: number, time: number): void;
+}
+
+/**
+ * Pins the Link session's bar grid to the followed deck's bar grid (D12/D13).
+ *
+ * Fed one call per accepted beat packet. The packet's arrival IS the deck's
+ * beat instant (verified < ±2 ms p-p jitter, research § 10), and beat-in-bar
+ * gives its position in the deck's bar — so the deck's phase at arrival is the
+ * integer beatInBar−1, while Link's phase is whatever the session happens to
+ * hold. The signed difference (wrapped to ±half a bar) is the offset; LOCK
+ * jumps it away once, TRACK trims the residue in clamped, deadbanded,
+ * median-filtered steps (D14). All corrections move the LINK timeline only —
+ * nothing is ever sent toward the deck (D8).
+ */
+export class GridPinner {
+  private readonly access: LinkGridAccess;
+  private readonly log: (msg: string) => void;
+  /** Recent measured offsets in ms, newest last (TRACK filter). */
+  private offsets: number[] = [];
+  private locked = false;
+  private lastBeatWallMs: number | null = null;
+  private lastDevice: number | null = null;
+
+  constructor(access: LinkGridAccess, log: (msg: string) => void) {
+    this.access = access;
+    this.log = log;
+  }
+
+  reset(reason: string): void {
+    if (this.locked) this.log(`[prodjlink] grid unlock (${reason})`);
+    this.locked = false;
+    this.offsets = [];
+    this.lastBeatWallMs = null;
+    this.lastDevice = null;
+  }
+
+  onBeat(beat: ParsedBeat): void {
+    if (beat.beatInBar < 1 || beat.beatInBar > BEATS_PER_BAR) return;
+    this.noteBeatTiming(beat.device);
+
+    const s = this.access.sample();
+    if (!s) return;
+
+    const msPerBeat = 60_000 / s.tempo;
+    // Where was Link's grid at the deck's beat instant? The sample is taken at
+    // packet-handling time; CALIBRATION_MS shifts it back to when the deck's
+    // beat actually sounded (default 0 — D15).
+    const linkBeatAtDeckInstant = s.beat - CALIBRATION_MS / msPerBeat;
+    const linkPhase = ((linkBeatAtDeckInstant % BEATS_PER_BAR) + BEATS_PER_BAR) % BEATS_PER_BAR;
+    const deckPhase = beat.beatInBar - 1;
+    const offsetBeats = wrapToHalfBar(linkPhase - deckPhase);
+    const offsetMs = offsetBeats * msPerBeat;
+
+    if (!this.locked) {
+      this.lock(s, beat.device, offsetBeats, offsetMs);
+      return;
+    }
+    this.track(s, offsetMs, msPerBeat);
+  }
+
+  /** Re-lock triggers (D14/D18): device switch, or a beat gap long enough to
+   *  mean pause/CUE — the deck's grid may have jumped arbitrarily. */
+  private noteBeatTiming(device: number): void {
+    const nowMs = Date.now();
+    if (this.lastDevice !== null && device !== this.lastDevice) {
+      this.reset(`device ${this.lastDevice} → ${device}`);
+    } else if (this.lastBeatWallMs !== null && nowMs - this.lastBeatWallMs > RELOCK_GAP_MS) {
+      this.reset('beat gap');
+    }
+    this.lastDevice = device;
+    this.lastBeatWallMs = nowMs;
+  }
+
+  private lock(s: { beat: number; timeAtBeat: number }, device: number, offsetBeats: number, offsetMs: number): void {
+    if (Math.abs(offsetBeats) > SNAP_THRESHOLD_BEATS) {
+      this.access.forceBeatAtTime(s.beat - offsetBeats, s.timeAtBeat);
+      this.log(`[prodjlink] grid LOCK: shifted ${offsetMs.toFixed(1)} ms (${offsetBeats.toFixed(3)} beat) — player ${device} downbeat == Link bar 0`);
+    } else {
+      this.log(`[prodjlink] grid LOCK: already aligned (offset ${offsetMs.toFixed(1)} ms)`);
+    }
+    this.locked = true;
+    this.offsets = [];
+  }
+
+  private track(s: { beat: number; timeAtBeat: number }, offsetMs: number, msPerBeat: number): void {
+    this.offsets.push(offsetMs);
+    if (this.offsets.length < OFFSET_FILTER_SIZE) return;
+    if (this.offsets.length > OFFSET_FILTER_SIZE) this.offsets.shift();
+
+    const med = median(this.offsets);
+    if (Math.abs(med) <= TRACK_DEADBAND_MS) return;
+
+    const stepMs = Math.sign(med) * Math.min(Math.abs(med), TRACK_CLAMP_MS);
+    this.access.forceBeatAtTime(s.beat - stepMs / msPerBeat, s.timeAtBeat);
+    this.log(`[prodjlink] grid step: ${stepMs.toFixed(1)} ms (median offset ${med.toFixed(1)} ms over ${this.offsets.length} beats)`);
+    // The applied step invalidates the collected offsets — refill before judging again.
+    this.offsets = [];
+  }
+}
+
+/** Signed wrap of a phase difference into (−half bar, +half bar]. */
+function wrapToHalfBar(offsetBeats: number): number {
+  let wrapped = offsetBeats;
+  if (wrapped > BEATS_PER_BAR / 2) wrapped -= BEATS_PER_BAR;
+  else if (wrapped <= -BEATS_PER_BAR / 2) wrapped += BEATS_PER_BAR;
+  return wrapped;
+}
+
+function median(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = sorted.length / 2;
+  return sorted.length % 2 === 1
+    ? sorted[Math.floor(mid)]
+    : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
 export interface ProDjLinkDevice {
   number: number;
   /** ASCII device name from the keep-alive ("XDJ-700"); empty until one is seen. */
@@ -105,11 +247,17 @@ export class ProDjLinkListener extends EventEmitter {
   private startedAt: number | null = null;
   private deafHintLogged = false;
   private status: ProDjLinkStatus = { kind: 'no-signal' };
+  private pinner: GridPinner | null = null;
   private readonly log: (msg: string) => void;
 
   constructor(log: (msg: string) => void) {
     super();
     this.log = log;
+  }
+
+  /** v2 (D12): attach the grid pinner. Called once at setup; absent = tempo-only (v1 / A-B bench). */
+  attachGridPinner(pinner: GridPinner): void {
+    this.pinner = pinner;
   }
 
   get running(): boolean {
@@ -163,6 +311,7 @@ export class ProDjLinkListener extends EventEmitter {
     this.lastBeatDevice = null;
     this.lastEffectiveBpm = null;
     this.startedAt = null;
+    this.pinner?.reset('listener stopped');
     this.setStatus({ kind: 'no-signal' });
     this.log('[prodjlink] stopped');
   }
@@ -207,6 +356,9 @@ export class ProDjLinkListener extends EventEmitter {
       this.log(`[prodjlink] player ${device}: effective ${effectiveBpm.toFixed(2)} BPM (raw ${rawBpm.toFixed(2)}, pitch ${((pitch - 1) * 100).toFixed(2)}%) → setTempo`);
       this.emit('tempo', effectiveBpm);
     }
+    // D16: tempo first (the synchronous 'tempo' emit above has already applied
+    // setTempo by the time it returns), then phase against the post-change grid.
+    this.pinner?.onBeat(beat);
     this.refreshStatus();
   }
 
