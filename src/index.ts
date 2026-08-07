@@ -4,6 +4,8 @@ import { updateElectronApp } from 'update-electron-app';
 import { Bridge } from './bridge';
 import type { BeatTick } from './ipc-types';
 import { initGameBundle, setupGameProtocol, createGameWindow, hasGameAssets } from './game-window';
+import { ProDjLinkListener, ProDjLinkStatus, MIXER_DEVICE_NUMBER } from './prodjlink';
+import { BridgeSettings, loadSettings, saveSettings } from './settings';
 
 declare const MAIN_WINDOW_WEBPACK_ENTRY: string;
 declare const MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY: string;
@@ -31,6 +33,8 @@ if (app.isPackaged && (process.platform === 'darwin' || process.platform === 'wi
 let tray: Tray | null = null;
 let statusWindow: BrowserWindow | null = null;
 let bridge: Bridge | null = null;
+let proDjLink: ProDjLinkListener | null = null;
+let settings: BridgeSettings = { proDjLinkEnabled: false, proDjLinkDeviceOverride: null };
 
 // Privileged-scheme registration and Chromium switches must land before 'ready'.
 // Unconditional: registering the app:// scheme is harmless in bridge-only mode.
@@ -265,12 +269,122 @@ function copyDiagnostics(): void {
   });
 }
 
-function setupTray(): void {
-  const icon = createTrayIcon();
-  tray = new Tray(icon);
-  tray.setToolTip('Joymixa Bridge');
+/**
+ * Pro DJ Link passive follow (v1) — tray surface.
+ *
+ * DEV-GATED (spec D10): the section — like the listener itself — exists only
+ * when `!app.isPackaged`. Packaged releases show and do nothing until the
+ * feature is explicitly promoted in a reviewed commit.
+ *
+ * The toggle/status/disclaimer strings are the spec's D9 copy, approved
+ * verbatim — do not reword. (The disclaimer is one approved sentence pair,
+ * rendered as two menu lines because menu items cannot wrap.)
+ */
+function proDjLinkMenuSection(): Electron.MenuItemConstructorOptions[] {
+  if (app.isPackaged || !proDjLink) return [];
 
-  const contextMenu = Menu.buildFromTemplate([
+  const items: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: 'Pro DJ Link — follow deck tempo (XDJ/CDJ)',
+      type: 'checkbox',
+      checked: settings.proDjLinkEnabled,
+      click: (menuItem) => setProDjLinkEnabled(menuItem.checked),
+    },
+  ];
+
+  if (settings.proDjLinkEnabled) {
+    items.push({ label: proDjLinkStatusLine(), enabled: false });
+    items.push({ label: 'Follow Player', submenu: proDjLinkPickerSubmenu() });
+  }
+
+  items.push({ label: 'Uses an unofficial protocol documented by the community.', enabled: false });
+  items.push({ label: 'A deck firmware update could break this feature at any time.', enabled: false });
+  items.push({ type: 'separator' });
+  return items;
+}
+
+/** Spec D9 status strings, verbatim. BPM at 2 decimals (research § 10, resolved 2026-08-07). */
+function proDjLinkStatusLine(): string {
+  const status: ProDjLinkStatus = proDjLink?.getStatus() ?? { kind: 'no-signal' };
+  switch (status.kind) {
+    case 'following':
+      return `Following Player ${status.player} — ${status.bpm.toFixed(2)} BPM`;
+    case 'no-beat-data':
+      return `Player ${status.player} detected — no beat data (track not analyzed in rekordbox?)`;
+    case 'signal-lost':
+      return `Signal lost — holding ${status.heldBpm.toFixed(2)} BPM`;
+    case 'no-signal':
+      return 'No Pro DJ Link signal';
+  }
+}
+
+function proDjLinkPickerSubmenu(): Electron.MenuItemConstructorOptions[] {
+  if (!proDjLink) return [];
+  const override = proDjLink.getDeviceOverride();
+  const devices = proDjLink.getDevices().filter((d) => d.number !== MIXER_DEVICE_NUMBER);
+
+  const items: Electron.MenuItemConstructorOptions[] = [
+    {
+      label: 'Automatic (lowest player number)',
+      type: 'radio',
+      checked: override === null,
+      click: () => setProDjLinkOverride(null),
+    },
+    ...devices.map((d): Electron.MenuItemConstructorOptions => ({
+      label: `Player ${d.number}${d.name ? ` — ${d.name}` : ''}`,
+      type: 'radio',
+      checked: override === d.number,
+      click: () => setProDjLinkOverride(d.number),
+    })),
+  ];
+
+  // An override for a device not currently on the network must stay visible,
+  // or the radio state would silently point at nothing.
+  if (override !== null && !devices.some((d) => d.number === override)) {
+    items.push({
+      label: `Player ${override} (not detected)`,
+      type: 'radio',
+      checked: true,
+      click: () => setProDjLinkOverride(override),
+    });
+  }
+  return items;
+}
+
+function setProDjLinkEnabled(enabled: boolean): void {
+  settings.proDjLinkEnabled = enabled;
+  saveSettings(settings);
+  if (enabled) {
+    proDjLink?.start();
+  } else {
+    proDjLink?.stop();
+  }
+  refreshTrayMenu();
+}
+
+function setProDjLinkOverride(deviceNumber: number | null): void {
+  settings.proDjLinkDeviceOverride = deviceNumber;
+  saveSettings(settings);
+  proDjLink?.setDeviceOverride(deviceNumber);
+  refreshTrayMenu();
+}
+
+/** Constructs the listener (dev-gated, D10) and wires it to the bridge and tray.
+ *  Must run after startBridge() so the logger and tempo sink exist. */
+function setupProDjLink(): void {
+  if (app.isPackaged) return;
+
+  proDjLink = new ProDjLinkListener((msg) => bridge?.logExternal(msg));
+  proDjLink.setDeviceOverride(settings.proDjLinkDeviceOverride);
+  proDjLink.on('tempo', (bpm: number) => bridge?.setTempoFromLocalSource(bpm, 'prodjlink'));
+  proDjLink.on('status', () => refreshTrayMenu());
+  proDjLink.on('devices', () => refreshTrayMenu());
+
+  if (settings.proDjLinkEnabled) proDjLink.start();
+}
+
+function buildTrayMenu(): Electron.Menu {
+  return Menu.buildFromTemplate([
     // Only offered when a game build has been copied in (scripts/copy-game-assets.sh) —
     // a plain bridge install has no game assets and must not show a dead entry.
     ...(hasGameAssets()
@@ -281,6 +395,7 @@ function setupTray(): void {
       click: () => toggleStatusWindow(),
     },
     { type: 'separator' },
+    ...proDjLinkMenuSection(),
     {
       label: 'Copy Diagnostics',
       click: () => copyDiagnostics(),
@@ -308,8 +423,19 @@ function setupTray(): void {
       },
     },
   ]);
+}
 
-  tray.setContextMenu(contextMenu);
+/** The Pro DJ Link section is the one dynamic part of the menu (status line,
+ *  device roster), so the whole menu is rebuilt on its state changes. */
+function refreshTrayMenu(): void {
+  tray?.setContextMenu(buildTrayMenu());
+}
+
+function setupTray(): void {
+  const icon = createTrayIcon();
+  tray = new Tray(icon);
+  tray.setToolTip('Joymixa Bridge');
+  tray.setContextMenu(buildTrayMenu());
 
   tray.on('click', () => {
     toggleStatusWindow();
@@ -441,10 +567,14 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.on('ready', () => {
+    settings = loadSettings();
     setupGameProtocol();
     setupIPC();
-    setupTray();
+    // Bridge before tray: the Pro DJ Link listener needs the bridge as its
+    // logger + tempo sink, and the tray menu renders the listener's state.
     startBridge();
+    setupProDjLink();
+    setupTray();
 
     if (bundleModeRequested && hasGameAssets()) {
       // Bundle mode: the game IS the app — go straight to it, no status popup.
@@ -461,5 +591,6 @@ app.on('window-all-closed', () => {
 });
 
 app.on('before-quit', () => {
+  proDjLink?.stop();
   bridge?.stop();
 });
