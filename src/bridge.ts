@@ -206,6 +206,27 @@ export class Bridge extends EventEmitter {
     return this.pinnedLines.join('\n') + '\n---\n' + this.logBuffer.join('\n');
   }
 
+  /** Log a line from an in-process subsystem (e.g. the Pro DJ Link listener)
+   *  into the ring buffer, so it reaches Copy Diagnostics like everything else. */
+  public logExternal(msg: string): void {
+    this.log(msg);
+  }
+
+  /**
+   * Tempo feed for in-process sources (the Pro DJ Link listener). Mirrors the
+   * WS `set-tempo` command path's no-atTime branch exactly: log, apply now,
+   * then rebroadcast a full clock anchor — to ALL clients, since there is no
+   * WS sender to exclude.
+   */
+  public setTempoFromLocalSource(tempo: number, sourceTag: string): void {
+    if (!this.link) return;
+    if (!isFinite(tempo) || tempo <= 0) return;
+    this.log(`[Bridge:${sourceTag}] set-tempo tempo=${tempo.toFixed(2)} (apply now)`);
+    this.link.setTempo(tempo);
+    const { tempo: newTempo, beat, phase, timeAtBeat: anchorTime } = this.link.getState(this.config.quantum);
+    this.broadcast({ type: 'tempo', tempo: newTempo, beat, phase, quantum: this.config.quantum, ts: Date.now(), anchorTime });
+  }
+
   private pin(msg: string): void {
     const line = `${new Date().toISOString()} ${msg}`;
     this.pinnedLines.push(line);
