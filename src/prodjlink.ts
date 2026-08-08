@@ -75,6 +75,10 @@ const TRACK_CLAMP_MS = 10;
 const OFFSET_FILTER_SIZE = 4;
 /** A beat gap this long invalidates the lock (pause/CUE) — next beat re-locks (D18/D14). */
 const RELOCK_GAP_MS = SIGNAL_LOST_DEBOUNCE_MS;
+/** A shorter hiccup in the beat stream (quick pause/CUE tap) makes the offset
+ *  window stale — the deck's grid may have shifted by the pause duration. Clear
+ *  the filter so the median is built from post-hiccup beats only. */
+const FILTER_STALE_GAP_MS = 1200;
 /** D15: constant trim for deck-transmit + receive-path offset. Default 0; set at bench. */
 const CALIBRATION_MS = 0;
 
@@ -155,6 +159,11 @@ export class GridPinner {
       this.reset(`device ${this.lastDevice} → ${device}`);
     } else if (this.lastBeatWallMs !== null && nowMs - this.lastBeatWallMs > RELOCK_GAP_MS) {
       this.reset('beat gap');
+    } else if (this.lastBeatWallMs !== null && nowMs - this.lastBeatWallMs > FILTER_STALE_GAP_MS) {
+      // Short pause/CUE tap: the grid may have shifted without unlocking.
+      // Drop pre-hiccup offsets so the median reflects the new grid only —
+      // the re-LOCK escape in track() then snaps it in one jump if needed.
+      this.offsets = [];
     }
     this.lastDevice = device;
     this.lastBeatWallMs = nowMs;
@@ -178,6 +187,17 @@ export class GridPinner {
 
     const med = median(this.offsets);
     if (Math.abs(med) <= TRACK_DEADBAND_MS) return;
+
+    // Re-LOCK escape: a filtered offset past the snap threshold is a grid JUMP
+    // (quick deck pause/CUE — the pause duration shifts every subsequent beat),
+    // not drift. Walking it at the clamp rate leaves us audibly misaligned for
+    // tens of seconds (measured: 194 ms took 40 s); snap it in one jump instead.
+    if (Math.abs(med) > SNAP_THRESHOLD_BEATS * msPerBeat) {
+      this.access.forceBeatAtTime(s.beat - med / msPerBeat, s.timeAtBeat);
+      this.log(`[prodjlink] grid re-LOCK: snapped ${med.toFixed(1)} ms (grid jump, e.g. deck pause/CUE)`);
+      this.offsets = [];
+      return;
+    }
 
     const stepMs = Math.sign(med) * Math.min(Math.abs(med), TRACK_CLAMP_MS);
     this.access.forceBeatAtTime(s.beat - stepMs / msPerBeat, s.timeAtBeat);
