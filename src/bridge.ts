@@ -206,6 +206,52 @@ export class Bridge extends EventEmitter {
     return this.pinnedLines.join('\n') + '\n---\n' + this.logBuffer.join('\n');
   }
 
+  /** Log a line from an in-process subsystem (e.g. the Pro DJ Link listener)
+   *  into the ring buffer, so it reaches Copy Diagnostics like everything else. */
+  public logExternal(msg: string): void {
+    this.log(msg);
+  }
+
+  /**
+   * Tempo feed for in-process sources (the Pro DJ Link listener). Mirrors the
+   * WS `set-tempo` command path's no-atTime branch exactly: log, apply now,
+   * then rebroadcast a full clock anchor — to ALL clients, since there is no
+   * WS sender to exclude.
+   */
+  public setTempoFromLocalSource(tempo: number, sourceTag: string): void {
+    if (!this.link) return;
+    if (!isFinite(tempo) || tempo <= 0) return;
+    this.log(`[Bridge:${sourceTag}] set-tempo tempo=${tempo.toFixed(2)} (apply now)`);
+    this.link.setTempo(tempo);
+    const { tempo: newTempo, beat, phase, timeAtBeat: anchorTime } = this.link.getState(this.config.quantum);
+    this.broadcast({ type: 'tempo', tempo: newTempo, beat, phase, quantum: this.config.quantum, ts: Date.now(), anchorTime });
+  }
+
+  /**
+   * Atomic (beat, timeAtBeat, tempo) snapshot at the configured quantum, taken
+   * now — the native getState() reads the Link clock and returns the pair for
+   * that instant, which makes it usable as a packet-arrival stamp (Pro DJ Link
+   * grid pinning, spec D12). Null while Link is down.
+   */
+  public getLinkGridSample(): { beat: number; timeAtBeat: number; tempo: number } | null {
+    if (!this.link) return null;
+    const { beat, timeAtBeat, tempo } = this.link.getState(this.config.quantum);
+    return { beat, timeAtBeat, tempo };
+  }
+
+  /**
+   * Grid pin for in-process sources (Pro DJ Link pinner). Mirrors the WS
+   * `force-beat-at-time` command path: log + apply; clients re-seed from the
+   * periodic state broadcasts, same as they do for the WS command (the
+   * probe-verified path).
+   */
+  public forceBeatAtTimeFromLocalSource(beat: number, time: number, sourceTag: string): void {
+    if (!this.link) return;
+    if (!isFinite(beat) || !isFinite(time)) return;
+    this.log(`[Bridge:${sourceTag}] force-beat-at-time beat=${beat.toFixed(3)} time=${time.toFixed(6)} quantum=${this.config.quantum}`);
+    this.link.forceBeatAtTime(beat, time, this.config.quantum);
+  }
+
   private pin(msg: string): void {
     const line = `${new Date().toISOString()} ${msg}`;
     this.pinnedLines.push(line);
