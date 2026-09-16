@@ -5,7 +5,7 @@ import { Bridge } from './bridge';
 import type { BeatTick } from './ipc-types';
 import { initGameBundle, setupGameProtocol, createGameWindow, hasGameAssets } from './game-window';
 import { ProDjLinkListener, ProDjLinkStatus, GridPinner, MIXER_DEVICE_NUMBER } from './prodjlink';
-import { BridgeSettings, loadSettings, saveSettings } from './settings';
+import { getSettings, loadSettings, updateSettings } from './settings';
 
 declare const MAIN_WINDOW_WEBPACK_ENTRY: string;
 declare const MAIN_WINDOW_PRELOAD_WEBPACK_ENTRY: string;
@@ -34,7 +34,6 @@ let tray: Tray | null = null;
 let statusWindow: BrowserWindow | null = null;
 let bridge: Bridge | null = null;
 let proDjLink: ProDjLinkListener | null = null;
-let settings: BridgeSettings = { proDjLinkEnabled: false, proDjLinkDeviceOverride: null };
 
 // Privileged-scheme registration and Chromium switches must land before 'ready'.
 // Unconditional: registering the app:// scheme is harmless in bridge-only mode.
@@ -287,12 +286,12 @@ function proDjLinkMenuSection(): Electron.MenuItemConstructorOptions[] {
     {
       label: 'Pro DJ Link — follow deck tempo (XDJ/CDJ)',
       type: 'checkbox',
-      checked: settings.proDjLinkEnabled,
+      checked: getSettings().proDjLinkEnabled,
       click: (menuItem) => setProDjLinkEnabled(menuItem.checked),
     },
   ];
 
-  if (settings.proDjLinkEnabled) {
+  if (getSettings().proDjLinkEnabled) {
     items.push({ label: proDjLinkStatusLine(), enabled: false });
     items.push({ label: 'Follow Player', submenu: proDjLinkPickerSubmenu() });
   }
@@ -352,8 +351,7 @@ function proDjLinkPickerSubmenu(): Electron.MenuItemConstructorOptions[] {
 }
 
 function setProDjLinkEnabled(enabled: boolean): void {
-  settings.proDjLinkEnabled = enabled;
-  saveSettings(settings);
+  updateSettings({ proDjLinkEnabled: enabled });
   if (enabled) {
     proDjLink?.start();
   } else {
@@ -363,8 +361,7 @@ function setProDjLinkEnabled(enabled: boolean): void {
 }
 
 function setProDjLinkOverride(deviceNumber: number | null): void {
-  settings.proDjLinkDeviceOverride = deviceNumber;
-  saveSettings(settings);
+  updateSettings({ proDjLinkDeviceOverride: deviceNumber });
   proDjLink?.setDeviceOverride(deviceNumber);
   refreshTrayMenu();
 }
@@ -376,7 +373,7 @@ function setupProDjLink(): void {
 
   const log = (msg: string): void => bridge?.logExternal(msg);
   proDjLink = new ProDjLinkListener(log);
-  proDjLink.setDeviceOverride(settings.proDjLinkDeviceOverride);
+  proDjLink.setDeviceOverride(getSettings().proDjLinkDeviceOverride);
   proDjLink.on('tempo', (bpm: number) => bridge?.setTempoFromLocalSource(bpm, 'prodjlink'));
   proDjLink.on('status', () => refreshTrayMenu());
   proDjLink.on('devices', () => refreshTrayMenu());
@@ -392,7 +389,7 @@ function setupProDjLink(): void {
     }, log));
   }
 
-  if (settings.proDjLinkEnabled) proDjLink.start();
+  if (getSettings().proDjLinkEnabled) proDjLink.start();
 }
 
 function buildTrayMenu(): Electron.Menu {
@@ -579,7 +576,7 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.on('ready', () => {
-    settings = loadSettings();
+    loadSettings();
     setupGameProtocol();
     setupIPC();
     // Bridge before tray: the Pro DJ Link listener needs the bridge as its

@@ -6,6 +6,7 @@ import { readFile, readdir } from 'fs/promises';
 import * as path from 'path';
 import * as os from 'os';
 import { createWriteStream, WriteStream } from 'fs';
+import { getSettings, updateSettings } from './settings';
 
 // Ableton Link native addon. Loaded via a guarded require, not a static import:
 // @xicnet/abletonlink calls bindings() at module top-level, so a missing, corrupt,
@@ -712,7 +713,7 @@ export class Bridge extends EventEmitter {
 
     try {
       this.link = new abletonLinkAddon(this.config.defaultBpm);
-      this.link.enable(true);
+      this.link.enable(getSettings().linkEnabled);
       this.link.enableStartStopSync(true);
     } catch (e) {
       this.running = false;
@@ -825,6 +826,7 @@ export class Bridge extends EventEmitter {
         type: 'hello',
         ...helloState,
         numClients: this.clients.size,
+        capabilities: ['set-link-enabled'],
         ...(jmxBeat !== undefined && { jmxBeat }),
         ...(this.measuredOutputLatency !== null
           ? {
@@ -1022,6 +1024,12 @@ export class Bridge extends EventEmitter {
       const { tempo, beat, phase, timeAtBeat: anchorTime } = this.link.getState(this.config.quantum);
       const ts = Date.now();
       this.broadcastExcept(sender, { type: 'tempo', tempo, beat, phase, quantum: this.config.quantum, ts, anchorTime });
+    }
+
+    if (msg.type === 'set-link-enabled' && typeof msg.enabled === 'boolean') {
+      this.log(`[Bridge:cmd] set-link-enabled enabled=${msg.enabled}`);
+      updateSettings({ linkEnabled: msg.enabled });
+      this.link.enable(msg.enabled);
     }
 
     if (msg.type === 'play') {

@@ -78,7 +78,8 @@ Sent immediately when a client connects. Contains a full state snapshot.
   "measuredOutputLatency": 21.3,
   "latencyMethod": "alsa-delay(max=2048/48000@card0/pcm0p/sub0)",
   "latencyDiagnostics": "alsa-delay: device=card0/pcm0p/sub0 rate=48000 samples=20 min=1024(21.3ms) max=2048(42.7ms)",
-  "jmxBeat": 2.5
+  "jmxBeat": 2.5,
+  "capabilities": ["set-link-enabled"]
 }
 ```
 
@@ -98,6 +99,7 @@ Sent immediately when a client connects. Contains a full state snapshot.
 | `latencyMethod` | string | Compact description of the measurement method used, e.g. `alsa-delay(max=2048/48000@card0/pcm0p/sub0)`. Set to `"none"` when measurement is unavailable. |
 | `latencyDiagnostics` | string? | Optional. Detailed diagnostic string for the latency measurement. Present only when `measuredOutputLatency` is present. Intended for remote debugging — clients may log it but should not parse it. |
 | `jmxBeat`      | float?  | Optional. Application-level loop beat from first active client that reported one (see `loop-beat` command) |
+| `capabilities` | string[]? | Optional. Commands this bridge understands beyond the original set, e.g. `"set-link-enabled"` when it supports being switched on and off remotely (see §4.8). Absent on older bridges. |
 
 `numClients` includes the newly connected client.
 
@@ -303,6 +305,22 @@ as `jmxBeat`.
 value (with an open connection) is used in broadcasts. This is intentional — it
 represents the primary session's loop position.
 
+### 4.8 `set-link-enabled`
+
+Enable or disable the bridge's Ableton Link session.
+
+```json
+{ "type": "set-link-enabled", "enabled": false }
+```
+
+**Validation:** `enabled` must be a boolean. Invalid values are silently ignored.
+
+**Side effect:** The bridge calls Link's own `enable()`/`disable()` and **persists**
+the choice in its settings file, so it survives a bridge restart. The change
+surfaces to all connected clients (including the sender) through the existing
+`linkEnabled` field on the next `state` broadcast — this command itself sends
+**no reply**, consistent with §7.
+
 ---
 
 ## 5. Computed Fields
@@ -386,7 +404,7 @@ before sending.
 
 | Type      | When                        | Key Fields                                  |
 |-----------|-----------------------------|---------------------------------------------|
-| `hello`   | On connect (once)           | Full state + `numClients` + optional `jmxBeat` |
+| `hello`   | On connect (once)           | Full state + `numClients` + optional `jmxBeat` + optional `capabilities` |
 | `state`   | Every 1/stateHz seconds     | Full state + `ts` + optional `jmxBeat`      |
 | `tempo`   | Tempo changes               | `tempo`, `beat`, `phase`, `quantum`, `ts`, `anchorTime` |
 | `playing` | Transport state changes     | `isPlaying`                                 |
@@ -404,3 +422,4 @@ before sending.
 | `force-beat-at-time`      | Force beat alignment                       | `beat`, `time`, `quantum`|
 | `relay`                   | Forward to other clients                   | `payload` (object)       |
 | `loop-beat`               | Report loop position                       | `beat` (float)           |
+| `set-link-enabled`        | Enable/disable Link (persisted)            | `enabled` (boolean)      |
