@@ -307,19 +307,35 @@ represents the primary session's loop position.
 
 ### 4.8 `set-link-enabled`
 
-Enable or disable the bridge's Ableton Link session.
+Cast this socket's follow vote for the bridge's Ableton Link session. Sent by every
+instance on every connect (right after `hello`) and on every change of its vote.
 
 ```json
 { "type": "set-link-enabled", "enabled": false }
+{ "type": "set-link-enabled", "enabled": true, "tempo": 128 }
 ```
 
-**Validation:** `enabled` must be a boolean. Invalid values are silently ignored.
+**Validation:** `enabled` must be a boolean; invalid values are silently ignored.
+`tempo` is optional and meaningful only with `enabled: true`: a finite number `> 0`,
+the sender's current locked BPM — omitted when it is still `0`.
 
-**Side effect:** The bridge calls Link's own `enable()`/`disable()` and **persists**
-the choice in its settings file, so it survives a bridge restart. The change
-surfaces to all connected clients (including the sender) through the existing
-`linkEnabled` field on the next `state` broadcast — this command itself sends
-**no reply**, consistent with §7.
+**Side effect — one vote per socket, OR'd:** the bridge keeps one vote per connected
+socket (`Map<WebSocket, boolean>`). On receipt it stores the vote, computes
+`want = OR(votes)`, and only if `want` differs from Link's current enabled state:
+when enabling, and `tempo` is valid, `link.setTempo(tempo)` is applied **first** —
+so the session brought onto the mesh already runs at the sender's tempo, since Link
+resets the session on every enable and the fresh, younger session wins the merge
+against any existing peer — then `link.enable(want)`, then the choice is **persisted**
+to the settings file. When `want` already equals the current state, nothing is
+applied and `tempo` is ignored (the session is already running). A socket closing
+removes its vote and re-evaluates the same way — the last following socket
+switching Off or disconnecting takes the bridge off the mesh.
+
+The change surfaces to all connected clients (including the sender) through the
+existing `linkEnabled` field on the next `state` broadcast — this command itself
+sends **no reply**, consistent with §7.
+
+**Bridge startup:** `link.enable(getSettings().linkEnabled)`, default `false`.
 
 ---
 
@@ -422,4 +438,4 @@ before sending.
 | `force-beat-at-time`      | Force beat alignment                       | `beat`, `time`, `quantum`|
 | `relay`                   | Forward to other clients                   | `payload` (object)       |
 | `loop-beat`               | Report loop position                       | `beat` (float)           |
-| `set-link-enabled`        | Enable/disable Link (persisted)            | `enabled` (boolean)      |
+| `set-link-enabled`        | Follow vote (per socket); `enabled`, optional `tempo` | `enabled` (boolean), optional `tempo` (float > 0) |

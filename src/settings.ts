@@ -16,14 +16,14 @@ export interface BridgeSettings {
   proDjLinkEnabled: boolean;
   /** Followed player number, or null for automatic (lowest seen — spec D2). */
   proDjLinkDeviceOverride: number | null;
-  /** Ableton Link enabled (default ON — a bridge never told otherwise behaves as before this setting existed). */
+  /** Ableton Link enabled (default OFF — the bridge joins the mesh when the first instance votes On, spec T-C2). */
   linkEnabled: boolean;
 }
 
 const DEFAULTS: BridgeSettings = {
   proDjLinkEnabled: false,
   proDjLinkDeviceOverride: null,
-  linkEnabled: true,
+  linkEnabled: false,
 };
 
 function settingsPath(): string {

@@ -150,6 +150,12 @@ export class Bridge extends EventEmitter {
   private wss: WebSocketServer | null = null;
   private clients = new Set<WebSocket>();
   private clientLoopBeats = new Map<WebSocket, number>();
+  /**
+   * Follow votes, one per connected socket (protocol § 4.8). Link is enabled iff any vote
+   * is true, re-evaluated on every vote change AND every socket close (spec T-C2): the last
+   * following tab switching Off or closing takes the bridge off the mesh.
+   */
+  private readonly linkVotes = new Map<WebSocket, boolean>();
   private stateInterval: ReturnType<typeof setInterval> | null = null;
   private lastLoggedStateTempo: number | null = null;
   private running = false;
@@ -226,6 +232,24 @@ export class Bridge extends EventEmitter {
     this.link.setTempo(tempo);
     const { tempo: newTempo, beat, phase, timeAtBeat: anchorTime } = this.link.getState(this.config.quantum);
     this.broadcast({ type: 'tempo', tempo: newTempo, beat, phase, quantum: this.config.quantum, ts: Date.now(), anchorTime });
+  }
+
+  /**
+   * Apply `OR(votes)` to Link, only on a change. `tempo` (T-N N1) is applied BEFORE enabling
+   * on the false → true edge, so the session we bring to the mesh already runs at it; Link
+   * resets the session on every enable and carries this tempo into the fresh one, and the
+   * fresh session is the younger, so any existing peer wins the merge
+   * (Controller.hpp updateEnabled → resetState).
+   */
+  private applyLinkVotes(reason: string, tempo?: number): void {
+    if (!this.link) return;
+    const want = [...this.linkVotes.values()].some(Boolean);
+    const current = this.link.isEnabled();
+    this.log(`[Bridge:votes] ${reason} votes=${this.linkVotes.size} want=${want} current=${current}`);
+    if (want === current) return;
+    if (want && tempo !== undefined) this.link.setTempo(tempo);
+    this.link.enable(want);
+    updateSettings({ linkEnabled: want });
   }
 
   /**
@@ -857,6 +881,7 @@ export class Bridge extends EventEmitter {
       ws.on('close', () => {
         this.clients.delete(ws);
         this.clientLoopBeats.delete(ws);
+        if (this.linkVotes.delete(ws)) this.applyLinkVotes('client closed');
         this.log(`[bridge] client disconnected. clients: ${this.clients.size}`);
         this.emit('clients', this.clients.size);
       });
@@ -1027,9 +1052,12 @@ export class Bridge extends EventEmitter {
     }
 
     if (msg.type === 'set-link-enabled' && typeof msg.enabled === 'boolean') {
-      this.log(`[Bridge:cmd] set-link-enabled enabled=${msg.enabled}`);
-      updateSettings({ linkEnabled: msg.enabled });
-      this.link.enable(msg.enabled);
+      this.linkVotes.set(sender, msg.enabled);
+      const tempo = msg.enabled && typeof msg.tempo === 'number' && isFinite(msg.tempo) && msg.tempo > 0
+        ? msg.tempo : undefined;
+      this.log(`[Bridge:cmd] set-link-enabled enabled=${msg.enabled}${tempo !== undefined ? ` tempo=${tempo.toFixed(2)}` : ''}`);
+      this.applyLinkVotes('vote', tempo);
+      return;
     }
 
     if (msg.type === 'play') {
