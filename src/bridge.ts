@@ -955,7 +955,16 @@ export class Bridge extends EventEmitter {
     }
 
     this.log('[bridge] stopped');
+    // NULL THE HANDLE, don't just end the stream. `stop()` closes the client sockets above,
+    // whose `close` handlers fire ASYNCHRONOUSLY and log (`[Bridge:votes] client closed`), so
+    // a log() lands after this point on every quit. With the field still set, `this.fileLog?.`
+    // passes the optional chain — the object exists, it is merely ended — and the write throws
+    // ERR_STREAM_WRITE_AFTER_END out of the main process, which Electron surfaces as a
+    // "A JavaScript error occurred in the main process" dialog on quit (seen 2026-09-22).
+    // Clearing the field makes the optional chain do the job it was written for. Nothing is
+    // lost: every line still goes to the ring buffer, which is what "Copy Diagnostics" reads.
     this.fileLog?.end();
+    this.fileLog = null;
     this.emit('stopped');
   }
 
