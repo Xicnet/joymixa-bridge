@@ -850,7 +850,7 @@ export class Bridge extends EventEmitter {
         type: 'hello',
         ...helloState,
         numClients: this.clients.size,
-        capabilities: ['set-link-enabled'],
+        capabilities: ['set-link-enabled', 'request-beat-at-time'],
         ...(jmxBeat !== undefined && { jmxBeat }),
         ...(this.measuredOutputLatency !== null
           ? {
@@ -1091,6 +1091,22 @@ export class Bridge extends EventEmitter {
       if (typeof beat === 'number' && typeof time === 'number' && typeof quantum === 'number') {
         this.log(`[Bridge:cmd] force-beat-at-time beat=${beat.toFixed(3)} time=${time} quantum=${quantum}`);
         this.link.forceBeatAtTime(beat, time, quantum);
+      }
+    }
+
+    if (msg.type === 'request-beat-at-time') {
+      const { beat, time } = msg;
+      const quantum = msg.quantum === undefined ? this.config.quantum : msg.quantum;
+      if (typeof beat === 'number' && isFinite(beat)
+        && typeof time === 'number' && isFinite(time) && time > 0
+        && typeof quantum === 'number' && isFinite(quantum) && quantum > 0) {
+        this.log(`[Bridge:cmd] request-beat-at-time beat=${beat.toFixed(3)} time=${time.toFixed(6)} quantum=${quantum}`);
+        // `time` is Link-clock seconds (the getCurrentTime() domain, as set-tempo's atTime).
+        // Alone in the session this re-maps at once; with peers it lands on the next time
+        // whose phase matches `beat`'s, so no peer sees a jump. Commits as the app session state.
+        this.link.requestBeatAtTime(beat, time, quantum);
+      } else {
+        this.log('[Bridge:cmd] request-beat-at-time ignored (invalid beat/time/quantum)');
       }
     }
   }

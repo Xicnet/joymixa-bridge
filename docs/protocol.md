@@ -79,7 +79,7 @@ Sent immediately when a client connects. Contains a full state snapshot.
   "latencyMethod": "alsa-delay(max=2048/48000@card0/pcm0p/sub0)",
   "latencyDiagnostics": "alsa-delay: device=card0/pcm0p/sub0 rate=48000 samples=20 min=1024(21.3ms) max=2048(42.7ms)",
   "jmxBeat": 2.5,
-  "capabilities": ["set-link-enabled"]
+  "capabilities": ["set-link-enabled", "request-beat-at-time"]
 }
 ```
 
@@ -99,7 +99,7 @@ Sent immediately when a client connects. Contains a full state snapshot.
 | `latencyMethod` | string | Compact description of the measurement method used, e.g. `alsa-delay(max=2048/48000@card0/pcm0p/sub0)`. Set to `"none"` when measurement is unavailable. |
 | `latencyDiagnostics` | string? | Optional. Detailed diagnostic string for the latency measurement. Present only when `measuredOutputLatency` is present. Intended for remote debugging — clients may log it but should not parse it. |
 | `jmxBeat`      | float?  | Optional. Application-level loop beat from first active client that reported one (see `loop-beat` command) |
-| `capabilities` | string[]? | Optional. Commands this bridge understands beyond the original set, e.g. `"set-link-enabled"` when it supports being switched on and off remotely (see §4.8). Absent on older bridges. |
+| `capabilities` | string[]? | Optional. Commands this bridge understands beyond the original set, e.g. `"set-link-enabled"` when it supports being switched on and off remotely (see §4.8), and `"request-beat-at-time"` when it understands that command (see §4.5a). A client should send a listed command only when the bridge lists it: older bridges silently ignore commands they do not know (§7). Absent on older bridges. |
 
 `numClients` includes the newly connected client.
 
@@ -276,6 +276,62 @@ into a Link session.
 **Validation:** All three fields (`beat`, `time`, `quantum`) must be numbers.
 Message is silently ignored if any field is missing or non-numeric.
 
+### 4.5a `request-beat-at-time`
+
+Ask Link to map a beat to a time, politely. This is the bridge's exposure of Link's
+`requestBeatAtTime` method (the SDK's "quantized launch" call). Numbered `4.5a` so the
+`4.6`–`4.8` citations in other documents keep pointing at the same entries.
+
+```json
+{ "type": "request-beat-at-time", "beat": 32, "time": 60807.849, "quantum": 4 }
+```
+
+| Field     | Type  | Required | Description                                                   |
+|-----------|-------|----------|---------------------------------------------------------------|
+| `beat`    | float | Yes      | The beat to map to `time`. Any finite number, including negative. |
+| `time`    | float | Yes      | Link-clock **seconds** (the bridge's `getCurrentTime()` / `clock().micros()/1e6` domain, the same domain as `set-tempo`'s `atTime`), `> 0`. |
+| `quantum` | float | No       | Phase-alignment unit, in beats, `> 0`. Defaults to the bridge config's quantum. |
+
+**Validation:** `beat` and `time` must be finite numbers and `time` must be `> 0`.
+`quantum`, when present, must be a finite number `> 0`; when absent it defaults to the
+bridge's configured quantum (as `request-quantized-start` does). A message that fails
+any of these is ignored (one line in the bridge log, nothing sent back, see §7). Note
+the difference from `request-quantized-start`, where a non-numeric `quantum` falls back
+to the default: here a present-but-invalid `quantum` voids the whole message.
+
+**Side effect:** the bridge calls `requestBeatAtTime(beat, time, quantum)` on a session
+state captured and committed through Link's application-thread pair
+(`captureAppSessionState` / `commitAppSessionState`). It does not touch the transport
+(play/stop state is unchanged) and sends no reply; clients see the result in the next
+`state` broadcast, as after `force-beat-at-time`.
+
+**What it does.** From `ableton/Link.hpp`, `requestBeatAtTime`:
+
+> If no other peers are connected, then this instance is in a session by itself and is
+> free to re-map the beat/time relationship whenever it pleases. In this case,
+> beatAtTime(time, quantum) == beat after this method has been called.
+>
+> If there are other peers in the session, this instance should not abruptly re-map the
+> beat/time relationship in the session because that would lead to beat discontinuities
+> among the other peers. In this case, the given beat will be mapped to the next time
+> value greater than the given time with the same phase as the given beat.
+
+Whether peers exist is decided from the peer count at the moment the bridge handles the
+message (`numPeers() > 0` when the session state is captured, `Link.ipp`).
+
+**When to use which.**
+
+- `request-beat-at-time`: a client that already plays on its own timeline and wants
+  Link to adopt a given beat/time pair without disturbing anyone. Alone, the mapping
+  takes effect at once; with peers, it waits for the next in-phase moment. The SDK:
+  "The client only needs to invoke this method to achieve this behavior and should not
+  need to explicitly check the number of peers."
+- `request-quantized-start`: starts the transport on a quantum boundary and sets beat
+  `0` there. Use it for "press play and join the bar", not to re-anchor a running timeline.
+- `force-beat-at-time`: maps the beat to the time unconditionally and broadcasts it. The
+  SDK: "DANGER: ... This is very anti-social behavior and should be avoided." Reserve it
+  for bridging an external clock (see 4.5).
+
 ### 4.6 `relay`
 
 Send an arbitrary message to all other connected clients. The bridge does not
@@ -436,6 +492,7 @@ before sending.
 | `stop`                    | Stop transport                             | (none)                   |
 | `request-quantized-start` | Start aligned to a quantum boundary        | optional `quantum`       |
 | `force-beat-at-time`      | Force beat alignment                       | `beat`, `time`, `quantum`|
+| `request-beat-at-time`    | Map a beat to a time; quantized if peers   | `beat`, `time` (Link-clock seconds, > 0), optional `quantum` |
 | `relay`                   | Forward to other clients                   | `payload` (object)       |
 | `loop-beat`               | Report loop position                       | `beat` (float)           |
 | `set-link-enabled`        | Follow vote (per socket); `enabled`, optional `tempo` | `enabled` (boolean), optional `tempo` (float > 0) |

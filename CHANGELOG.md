@@ -1,5 +1,12 @@
 # Changelog
 
+## [Unreleased]
+
+### Added
+- WebSocket `request-beat-at-time` command: maps a beat to a Link-clock time through Link's
+  `requestBeatAtTime` (quantized launch: immediate when alone, in-phase when peers are present).
+  Advertised in the `hello` `capabilities` array. See `docs/protocol.md` § 4.5a.
+
 ## 1.9.0 — 2026-07-13
 
 ### Added
