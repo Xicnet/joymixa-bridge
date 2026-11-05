@@ -271,7 +271,9 @@ Align the session's beat 0 to a quantum boundary: `requestBeatAtTime(0, t, quant
 with `t` the current time, so alone in the session beat 0 is now and with peers it is
 the next time with phase 0 (`request-beat-at-time`, § 4.5a, with the beat fixed at 0).
 **The transport is not touched.** The sender aligns its own start to bar 0; it is not
-announcing a session start, so a peer following Start Stop Sync must not start on it.
+announcing a session start, so a peer following Start Stop Sync must not start on it. With
+other clients connected and no Link peer the request is quantized like a request with peers
+(§ 4.5a), so the other clients' loops do not move.
 
 ```json
 { "type": "request-quantized-start", "quantum": 4 }
@@ -347,7 +349,12 @@ state captured and committed through Link's application-thread pair
 > value greater than the given time with the same phase as the given beat.
 
 Whether peers exist is decided from the peer count at the moment the bridge handles the
-message (`numPeers() > 0` when the session state is captured, `Link.ipp`).
+message (`numPeers() > 0` when the session state is captured, `Link.ipp`). **Other clients of
+this bridge count as peers too (2026-11-05):** every client shares the bridge's one Link peer,
+so with several clients connected and no Link peer the bridge quantizes the request itself the
+way Link does with peers (the beat lands on the next instant at or after `time` with the beat's
+phase, a whole number of quanta from the session's numbering), and no other client's loop
+position moves. The same rule applies to `request-quantized-start` (§ 4.4).
 
 **When to use which.**
 

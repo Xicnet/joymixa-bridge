@@ -13,6 +13,10 @@
   See `docs/protocol.md` § 4.2.
 
 ### Changed
+- `request-beat-at-time` and `request-quantized-start` with several clients connected and no Link
+  peer: the bridge quantizes the request the way Link does with peers (the beat lands on the next
+  in-phase instant), so another client's loop never jumps for one client's start or solo-to-Link
+  flip. See `docs/protocol.md` § 4.5a.
 - `request-quantized-start` no longer starts the transport: it maps beat 0 to the next quantum
   boundary (`requestBeatAtTime`) and leaves `isPlaying` alone. The web app's fallback engine sends
   it to align its own start to bar 0, which used to read as a session start to every peer with
