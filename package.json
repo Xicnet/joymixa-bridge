@@ -56,7 +56,7 @@
     "typescript": "~5.7.0"
   },
   "dependencies": {
-    "@xicnet/abletonlink": "git+https://github.com/Xicnet/ableton-link.git#c171c4d93d87087e69275186a55202258bef4f9e",
+    "@xicnet/abletonlink": "git+https://github.com/Xicnet/ableton-link.git#133b0c51a61d0e7d2a68877996cc366bec1af618",
     "coreaudio-latency": "file:native/coreaudio-latency",
     "electron-squirrel-startup": "^1.0.1",
     "update-electron-app": "^3.3.0",

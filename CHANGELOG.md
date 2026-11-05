@@ -6,6 +6,17 @@
 - WebSocket `request-beat-at-time` command: maps a beat to a Link-clock time through Link's
   `requestBeatAtTime` (quantized launch: immediate when alone, in-phase when peers are present).
   Advertised in the `hello` `capabilities` array. See `docs/protocol.md` § 4.5a.
+- `play` and `stop` take an optional `atTime` (Link-clock seconds, as `set-tempo`'s): the
+  transport transition is committed at that instant instead of at receipt, so a client that
+  arms its own bar starts Start-Stop-Sync peers on that bar. Advertised as `play-at-time` in
+  `hello.capabilities`. Needs `@xicnet/abletonlink` `133b0c5` (`setIsPlaying(playing, atTime)`).
+  See `docs/protocol.md` § 4.2.
+
+### Changed
+- `request-quantized-start` no longer starts the transport: it maps beat 0 to the next quantum
+  boundary (`requestBeatAtTime`) and leaves `isPlaying` alone. The web app's fallback engine sends
+  it to align its own start to bar 0, which used to read as a session start to every peer with
+  Start Stop Sync on, with nothing ever stopping them. See `docs/protocol.md` § 4.4.
 
 ## 1.9.0 — 2026-07-13
 

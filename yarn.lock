@@ -1329,9 +1329,9 @@
     "@webassemblyjs/ast" "1.14.1"
     "@xtuc/long" "4.2.2"
 
-"@xicnet/abletonlink@git+https://github.com/Xicnet/ableton-link.git#c171c4d93d87087e69275186a55202258bef4f9e":
+"@xicnet/abletonlink@git+https://github.com/Xicnet/ableton-link.git#133b0c51a61d0e7d2a68877996cc366bec1af618":
   version "1.2.5"
-  resolved "git+https://github.com/Xicnet/ableton-link.git#c171c4d93d87087e69275186a55202258bef4f9e"
+  resolved "git+https://github.com/Xicnet/ableton-link.git#133b0c51a61d0e7d2a68877996cc366bec1af618"
   dependencies:
     bindings "^1.5.0"
     node-addon-api "^8.0.0"
