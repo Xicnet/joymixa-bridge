@@ -6,6 +6,13 @@ Kotlin + NDK (C++ JNI wrapping the Ableton Link SDK).
 Runs as a foreground service with a persistent notification — Android's
 equivalent of the desktop system tray icon.
 
+> **Licensing (2026-09-15).** The vendored Link SDK is GPLv2+ / commercial dual-licensed. The `bundle`
+> flavor loads it over JNI into the same process as the closed Joymixa web bundle (a foreground service
+> is not a separate process; no manifest declares `android:process`), so that flavor cannot ship closed
+> without Ableton's commercial licence. `bridgeOnly` is a standalone GPL app and is the shape that keeps
+> the desktop model. Full analysis: joymixa repo `docs/research/sync/ableton-link-licensing.md`
+> § "Android bundle".
+
 ## Quick build
 
 ```bash
