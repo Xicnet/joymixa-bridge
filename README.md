@@ -106,10 +106,10 @@ Full spec: [docs/protocol.md](docs/protocol.md)
 | Message | Fields | Effect |
 |---------|--------|--------|
 | `set-tempo` | `tempo: number` | Sets Link tempo |
-| `play` | -- | Starts Link transport |
-| `stop` | -- | Stops Link transport |
+| `play` | `atTime?: number` | Starts Link transport (at `atTime`, Link-clock seconds; else now) |
+| `stop` | `atTime?: number` | Stops Link transport (at `atTime`; else now) |
 | `relay` | `payload: {...}` | Forwards to all other clients |
-| `request-quantized-start` | `quantum?: number` | Starts at next quantum boundary |
+| `request-quantized-start` | `quantum?: number` | Beat 0 at the next quantum boundary; transport untouched |
 | `force-beat-at-time` | `beat, time, quantum` | Forces beat alignment |
 
 ## Project Structure

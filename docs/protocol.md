@@ -79,7 +79,7 @@ Sent immediately when a client connects. Contains a full state snapshot.
   "latencyMethod": "alsa-delay(max=2048/48000@card0/pcm0p/sub0)",
   "latencyDiagnostics": "alsa-delay: device=card0/pcm0p/sub0 rate=48000 samples=20 min=1024(21.3ms) max=2048(42.7ms)",
   "jmxBeat": 2.5,
-  "capabilities": ["set-link-enabled", "request-beat-at-time"]
+  "capabilities": ["set-link-enabled", "request-beat-at-time", "play-at-time"]
 }
 ```
 
@@ -99,7 +99,7 @@ Sent immediately when a client connects. Contains a full state snapshot.
 | `latencyMethod` | string | Compact description of the measurement method used, e.g. `alsa-delay(max=2048/48000@card0/pcm0p/sub0)`. Set to `"none"` when measurement is unavailable. |
 | `latencyDiagnostics` | string? | Optional. Detailed diagnostic string for the latency measurement. Present only when `measuredOutputLatency` is present. Intended for remote debugging — clients may log it but should not parse it. |
 | `jmxBeat`      | float?  | Optional. Application-level loop beat from first active client that reported one (see `loop-beat` command) |
-| `capabilities` | string[]? | Optional. Commands this bridge understands beyond the original set, e.g. `"set-link-enabled"` when it supports being switched on and off remotely (see §4.8), and `"request-beat-at-time"` when it understands that command (see §4.5a). A client should send a listed command only when the bridge lists it: older bridges silently ignore commands they do not know (§7). Absent on older bridges. |
+| `capabilities` | string[]? | Optional. Commands this bridge understands beyond the original set, e.g. `"set-link-enabled"` when it supports being switched on and off remotely (see §4.8), and `"request-beat-at-time"` when it understands that command (see §4.5a), and `"play-at-time"` when `play` / `stop` honour `atTime` (see §4.2). A client should send a listed command only when the bridge lists it: older bridges silently ignore commands they do not know (§7). Absent on older bridges. |
 
 `numClients` includes the newly connected client.
 
@@ -234,7 +234,24 @@ Start the Link transport.
 
 ```json
 { "type": "play" }
+{ "type": "play", "atTime": 60807.849 }
 ```
+
+| Field    | Type  | Required | Description |
+|----------|-------|----------|-------------|
+| `atTime` | float | No       | Link-clock **seconds** at which the transport starts (the bridge's `getCurrentTime()` domain, the same as `set-tempo`'s `atTime`), `> 0`. Absent: now. |
+
+**Validation:** a present `atTime` that is not a finite number `> 0` is ignored and the
+start is applied now (one line in the bridge log, as § 7).
+
+**Side effect:** `setIsPlaying(true, atTime)` on the app session state. Link keeps the
+transition's time (`timeForIsPlaying`), so a peer that follows the start with
+`requestBeatAtStartPlayingTime` (LinkHut does) lands on that instant, not on the
+bridge's receipt time. A client that arms its own bar sends the bar's time here, which
+is what makes its start and a peer's coincide. Bridges that list `play-at-time` in
+`hello.capabilities` (§ 3.1) honour the field; older bridges ignore it and start at
+receipt, up to a bar early for such a client, so a client should send transport
+commands only to a bridge that lists it.
 
 ### 4.3 `stop`
 
@@ -242,12 +259,21 @@ Stop the Link transport.
 
 ```json
 { "type": "stop" }
+{ "type": "stop", "atTime": 60807.849 }
 ```
+
+`atTime` as in § 4.2: the instant the transport stops; absent, now. A pause is
+sent with the buffer's instant, so it is in practice "now" plus the socket.
 
 ### 4.4 `request-quantized-start`
 
-Request playback to start aligned to a quantum boundary (phase 0). Sets beat to 0 at
-the start-playing time, then starts transport.
+Align the session's beat 0 to a quantum boundary: `requestBeatAtTime(0, t, quantum)`
+with `t` the current time, so alone in the session beat 0 is now and with peers it is
+the next time with phase 0 (`request-beat-at-time`, § 4.5a, with the beat fixed at 0).
+**The transport is not touched.** The sender aligns its own start to bar 0; it is not
+announcing a session start, so a peer following Start Stop Sync must not start on it. With
+other clients connected and no Link peer the request is quantized like a request with peers
+(§ 4.5a), so the other clients' loops do not move.
 
 ```json
 { "type": "request-quantized-start", "quantum": 4 }
@@ -256,6 +282,12 @@ the start-playing time, then starts transport.
 | Field     | Type  | Required | Description                              |
 |-----------|-------|----------|------------------------------------------|
 | `quantum` | float | No       | Override the phase-alignment unit, in beats (defaults to bridge config) |
+
+**History.** Until 2026-11-05 (joymixa #64, phase 2) this was
+`setIsPlayingAndRequestBeatAtTime(true, t, 0, quantum)`: the same beat-0 mapping plus
+`isPlaying = true`, which started every peer with Start Stop Sync on, and nothing from
+that client ever stopped them. A client that wants a session start sends `play` (§ 4.2),
+with the bar's `atTime`.
 
 ### 4.5 `force-beat-at-time`
 
@@ -317,7 +349,12 @@ state captured and committed through Link's application-thread pair
 > value greater than the given time with the same phase as the given beat.
 
 Whether peers exist is decided from the peer count at the moment the bridge handles the
-message (`numPeers() > 0` when the session state is captured, `Link.ipp`).
+message (`numPeers() > 0` when the session state is captured, `Link.ipp`). **Other clients of
+this bridge count as peers too (2026-11-05):** every client shares the bridge's one Link peer,
+so with several clients connected and no Link peer the bridge quantizes the request itself the
+way Link does with peers (the beat lands on the next instant at or after `time` with the beat's
+phase, a whole number of quanta from the session's numbering), and no other client's loop
+position moves. The same rule applies to `request-quantized-start` (§ 4.4).
 
 **When to use which.**
 
@@ -326,8 +363,8 @@ message (`numPeers() > 0` when the session state is captured, `Link.ipp`).
   takes effect at once; with peers, it waits for the next in-phase moment. The SDK:
   "The client only needs to invoke this method to achieve this behavior and should not
   need to explicitly check the number of peers."
-- `request-quantized-start`: starts the transport on a quantum boundary and sets beat
-  `0` there. Use it for "press play and join the bar", not to re-anchor a running timeline.
+- `request-quantized-start`: sets beat `0` at a quantum boundary (the transport is not
+  touched). Use it to align an own start to bar 0, not to re-anchor a running timeline.
 - `force-beat-at-time`: maps the beat to the time unconditionally and broadcasts it. The
   SDK: "DANGER: ... This is very anti-social behavior and should be avoided." Reserve it
   for bridging an external clock (see 4.5).
@@ -488,9 +525,9 @@ before sending.
 | Type                      | Effect                                     | Required Fields          |
 |---------------------------|--------------------------------------------|--------------------------|
 | `set-tempo`               | Change Link tempo                          | `tempo` (float > 0), optional `atTime` |
-| `play`                    | Start transport                            | (none)                   |
-| `stop`                    | Stop transport                             | (none)                   |
-| `request-quantized-start` | Start aligned to a quantum boundary        | optional `quantum`       |
+| `play`                    | Start transport                            | optional `atTime` (Link-clock seconds, > 0) |
+| `stop`                    | Stop transport                             | optional `atTime` (Link-clock seconds, > 0) |
+| `request-quantized-start` | Beat 0 at a quantum boundary; transport untouched | optional `quantum`       |
 | `force-beat-at-time`      | Force beat alignment                       | `beat`, `time`, `quantum`|
 | `request-beat-at-time`    | Map a beat to a time; quantized if peers   | `beat`, `time` (Link-clock seconds, > 0), optional `quantum` |
 | `relay`                   | Forward to other clients                   | `payload` (object)       |

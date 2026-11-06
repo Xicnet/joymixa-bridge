@@ -850,7 +850,7 @@ export class Bridge extends EventEmitter {
         type: 'hello',
         ...helloState,
         numClients: this.clients.size,
-        capabilities: ['set-link-enabled', 'request-beat-at-time'],
+        capabilities: ['set-link-enabled', 'request-beat-at-time', 'play-at-time'],
         ...(jmxBeat !== undefined && { jmxBeat }),
         ...(this.measuredOutputLatency !== null
           ? {
@@ -1069,21 +1069,30 @@ export class Bridge extends EventEmitter {
       return;
     }
 
-    if (msg.type === 'play') {
-      this.log('[Bridge:cmd] play');
-      this.link.setIsPlaying(true);
-    }
-
-    if (msg.type === 'stop') {
-      this.log('[Bridge:cmd] stop');
-      this.link.setIsPlaying(false);
+    if (msg.type === 'play' || msg.type === 'stop') {
+      // Optional `atTime`: Link-clock seconds, the same domain as set-tempo's atTime. A client
+      // that arms its own bar commits the start AT that bar, so a peer following the edge
+      // (LinkHut: requestBeatAtStartPlayingTime at timeForIsPlaying) lands on it instead of
+      // up to a bar early. Absent: now, the original behaviour. Advertised as `play-at-time`.
+      const isPlaying = msg.type === 'play';
+      if (typeof msg.atTime === 'number' && isFinite(msg.atTime) && msg.atTime > 0) {
+        this.log(`[Bridge:cmd] ${msg.type} atTime=${msg.atTime.toFixed(6)}`);
+        this.link.setIsPlaying(isPlaying, msg.atTime);
+      } else {
+        this.log(`[Bridge:cmd] ${msg.type}${msg.atTime === undefined ? '' : ' (invalid atTime ignored)'} (apply now)`);
+        this.link.setIsPlaying(isPlaying);
+      }
     }
 
     if (msg.type === 'request-quantized-start') {
       const quantum = typeof msg.quantum === 'number' ? msg.quantum : this.config.quantum;
       const time = this.link.getTimeForBeat(this.link.getBeat(), quantum);
-      this.log(`[Bridge:cmd] request-quantized-start quantum=${quantum}`);
-      this.link.setIsPlayingAndRequestBeatAtTime(true, time, 0, quantum);
+      this.log(`[Bridge:cmd] request-quantized-start quantum=${quantum} (beat 0 only, transport untouched)`);
+      // Beat 0 at the next quantum boundary (alone: at once), and NOTHING about the transport:
+      // the sender aligns its own start to bar 0; it is not announcing a session start. Until
+      // 2026-11-05 this was setIsPlayingAndRequestBeatAtTime(true, ...), which started every
+      // peer following Start Stop Sync with nothing ever stopping them (joymixa #64, phase 2).
+      this.requestBeatAtTime(this.link, 0, time, quantum);
     }
 
     if (msg.type === 'force-beat-at-time') {
@@ -1102,13 +1111,35 @@ export class Bridge extends EventEmitter {
         && typeof quantum === 'number' && isFinite(quantum) && quantum > 0) {
         this.log(`[Bridge:cmd] request-beat-at-time beat=${beat.toFixed(3)} time=${time.toFixed(6)} quantum=${quantum}`);
         // `time` is Link-clock seconds (the getCurrentTime() domain, as set-tempo's atTime).
-        // Alone in the session this re-maps at once; with peers it lands on the next time
-        // whose phase matches `beat`'s, so no peer sees a jump. Commits as the app session state.
-        this.link.requestBeatAtTime(beat, time, quantum);
+        // Alone in the session this re-maps at once; with peers (or other clients of this
+        // bridge, below) it lands on the next time whose phase matches `beat`'s, so no peer
+        // sees a jump. Commits as the app session state.
+        this.requestBeatAtTime(this.link, beat, time, quantum);
       } else {
         this.log('[Bridge:cmd] request-beat-at-time ignored (invalid beat/time/quantum)');
       }
     }
+  }
+
+  /**
+   * Link quantizes a beat request only when it has Link peers (SessionState::requestBeatAtTime: alone,
+   * the beat is mapped to `time` at once). Every client of this bridge shares its one Link peer, so with
+   * several clients and no Link peer the bridge quantizes the request itself, as Link would: the beat
+   * lands on the next instant at or after `time` with the beat's phase (Phase.hpp nextPhaseMatch), a
+   * whole number of quanta from where the session's numbering has it, so no other client's loop
+   * position moves. A client's own start (its armed bar) maps onto itself; a solo-to-Link flip's beat
+   * takes the phase seam a joiner takes with peers (joymixa #64, phase 2, docs/protocol.md § 4.5a).
+   */
+  private requestBeatAtTime(link: AbletonLink, beat: number, time: number, quantum: number): void {
+    if (link.getNumPeers() === 0 && this.clients.size > 1) {
+      const { beat: sessionBeat, tempo, timeAtBeat } = link.getState(quantum);
+      const beatAtTime = sessionBeat + (time - timeAtBeat) * tempo / 60;
+      const phaseDiff = ((beat - beatAtTime) % quantum + quantum) % quantum;
+      const quantized = timeAtBeat + (beatAtTime + phaseDiff - sessionBeat) * 60 / tempo;
+      this.log(`[Bridge:cmd] beat request quantized (${this.clients.size} clients, no Link peer): beat=${beat.toFixed(3)} time=${time.toFixed(6)} -> ${quantized.toFixed(6)}`);
+      time = quantized;
+    }
+    link.requestBeatAtTime(beat, time, quantum);
   }
 
   private getJmxBeat(): number | undefined {
