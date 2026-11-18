@@ -35,6 +35,8 @@ yarn rebuild          # runs electron-rebuild -f -w @xicnet/abletonlink
 - **Linux**: `libavahi-compat-libdnssd-dev` (mDNS/DNS-SD for Link peer discovery)
 - **macOS/Windows**: Bonjour SDK (usually pre-installed)
 - TypeScript ~5.7, ES6/CommonJS target
+- **Floor target**: end-user laptops and desktops from about 2018 onwards (mobile: whatever the bundle
+  WebView supports on Android API 24+)
 
 ## Architecture
 
